@@ -1,8 +1,8 @@
 import 'package:go_router/go_router.dart';
 
 import '../screens/account_screen.dart';
+import '../screens/about_screen.dart';
 import '../screens/bookmark_screen.dart';
-import '../screens/central_schemes_screen.dart';
 import '../screens/feedback_screen.dart';
 import '../screens/admin_feedback_screen.dart';
 import '../screens/admin_manage_schemes_screen.dart';
@@ -15,10 +15,12 @@ import '../screens/scheme_details_screen.dart';
 import '../screens/splash_screen.dart';
 import '../screens/state_schemes_screen.dart';
 import '../screens/registration_screen.dart';
+import '../screens/gemini_chat_screen.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/splash',
   routes: [
+    // ── Public ────────────────────────────────────────────────────────────────
     GoRoute(
       path: '/splash',
       builder: (context, state) => const SplashScreen(),
@@ -31,6 +33,17 @@ final GoRouter appRouter = GoRouter(
       path: '/register',
       builder: (context, state) => const RegistrationScreen(),
     ),
+
+    // ── Scheme detail (full-screen, no shell nav) ─────────────────────────────
+    GoRoute(
+      path: '/scheme/:schemeId',
+      builder: (context, state) {
+        final schemeId = state.pathParameters['schemeId'] ?? '';
+        return SchemeDetailsScreen(schemeId: schemeId);
+      },
+    ),
+
+    // ── User shell ────────────────────────────────────────────────────────────
     ShellRoute(
       builder: (context, state, child) => HomeShell(
         currentPath: state.uri.path,
@@ -46,8 +59,8 @@ final GoRouter appRouter = GoRouter(
           builder: (context, state) => const StateSchemesScreen(),
         ),
         GoRoute(
-          path: '/home/central',
-          builder: (context, state) => const CentralSchemesScreen(),
+          path: '/home/about',
+          builder: (context, state) => const AboutScreen(),
         ),
         GoRoute(
           path: '/home/feedback',
@@ -57,8 +70,26 @@ final GoRouter appRouter = GoRouter(
           path: '/home/account',
           builder: (context, state) => const AccountScreen(),
         ),
+
+        // Gemini AI Chat
+        GoRoute(
+          path: '/home/ai',
+          builder: (context, state) => const GeminiChatScreen(),
+        ),
+
+        // Bookmarks & Notifications share the user shell (so they keep the nav)
+        GoRoute(
+          path: '/bookmarks',
+          builder: (context, state) => const BookmarkScreen(),
+        ),
+        GoRoute(
+          path: '/notifications',
+          builder: (context, state) => const NotificationsScreen(),
+        ),
       ],
     ),
+
+    // ── Admin shell ───────────────────────────────────────────────────────────
     ShellRoute(
       builder: (context, state, child) => HomeShell(
         currentPath: state.uri.path,
@@ -75,8 +106,7 @@ final GoRouter appRouter = GoRouter(
         ),
         GoRoute(
           path: '/admin/notifications',
-          builder: (context, state) =>
-              const AdminNotificationsScreen(),
+          builder: (context, state) => const AdminNotificationsScreen(),
         ),
         GoRoute(
           path: '/admin/users',
@@ -84,21 +114,5 @@ final GoRouter appRouter = GoRouter(
         ),
       ],
     ),
-    GoRoute(
-      path: '/scheme/:schemeId',
-      builder: (context, state) {
-        final schemeId = state.pathParameters['schemeId'] ?? '';
-        return SchemeDetailsScreen(schemeId: schemeId);
-      },
-    ),
-    GoRoute(
-      path: '/bookmarks',
-      builder: (context, state) => const BookmarkScreen(),
-    ),
-    GoRoute(
-      path: '/notifications',
-      builder: (context, state) => const NotificationsScreen(),
-    ),
   ],
 );
-

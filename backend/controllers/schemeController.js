@@ -1,127 +1,136 @@
 const Scheme = require('../models/Scheme');
+const User   = require('../models/User');
+const { getSmartSchemes } = require('../services/groqSchemeService');
 
+// ─── Response mapper ──────────────────────────────────────────────────────────
+function schemeResponse(s) {
+  return {
+    id:            s._id ? s._id.toString() : s.id,
+    name:          s.name,
+    state:         s.state,
+    type:          s.type,
+    category:      s.category,
+    description:   s.description,
+    benefits:      s.benefits  || [],
+    eligibility:   s.eligibility || [],
+    documents:     s.documents || [],
+    deadline:      s.deadline,
+    applyLink:     s.applyLink,
+    source:        s.source        || 'official',
+    confidence:    s.confidence    ?? 1.0,
+    fetchedAt:     s.fetchedAt,
+    lastVerifiedAt:s.lastVerifiedAt,
+    isAiGenerated: s.isAiGenerated,
+    approved:      s.approved,
+  };
+}
+
+// ─── GET /api/schemes/smart ───────────────────────────────────────────────────
+/**
+ * DB-first fetch:
+ *   1. If fresh DB data exists  → return immediately
+ *   2. Else → Groq → validate → store → return
+ */
+async function getSmartSchemesHandler(req, res) {
+  try {
+    const user = await User.findById(req.user.sub).lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+
+    const profile = {
+      state:    user.state    || '',
+      crops:    user.crops    || [],
+      soilType: user.soilType || '',
+      landSize: user.landSize || 0,
+    };
+
+    const { schemes, source } = await getSmartSchemes(profile);
+    console.log(`[Schemes] Returning ${schemes.length} schemes (source: ${source})`);
+    return res.json(schemes.map(schemeResponse));
+
+  } catch (err) {
+    console.error('[Schemes] Smart fetch error:', err.message);
+    return res.status(500).json({ message: err.message || 'Failed to fetch schemes.' });
+  }
+}
+
+// ─── GET /api/schemes  (admin: list all) ─────────────────────────────────────
 async function listAll(req, res) {
   try {
     const schemes = await Scheme.find().sort({ createdAt: -1 }).lean();
-    const mapped = schemes.map((s) => {
-      const id = s._id.toString();
-      return {
-        id,
-        scheme_name: s.scheme_name,
-        scheme_type: s.scheme_type,
-        state: s.state ?? '',
-        basic_info: s.description ?? '',
-        description: s.description ?? '',
-        benefits: s.benefits ?? [],
-        application_link: s.application_link ?? '',
-        last_date: s.last_date ?? '',
-      };
-    });
-    return res.json(mapped);
+    return res.json(schemes.map(schemeResponse));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Failed to load schemes' });
   }
 }
 
+// ─── POST /api/schemes  (admin: create) ──────────────────────────────────────
 async function create(req, res) {
   try {
     const {
-      scheme_name,
-      scheme_type,
-      state,
-      description,
-      benefits,
-      application_link,
-      last_date,
+      name, state, type, category, description,
+      benefits, eligibility, documents, deadline, applyLink,
     } = req.body;
 
-    if (!scheme_name || !scheme_type) {
-      return res.status(400).json({ message: 'scheme_name and scheme_type are required' });
+    if (!name || !type) {
+      return res.status(400).json({ message: 'name and type are required' });
     }
 
-    const typeNorm = String(scheme_type).toLowerCase().includes('central')
-      ? 'Central'
-      : 'State';
+    const typeNorm = String(type).toLowerCase() === 'central' ? 'central' : 'state';
+    const stateNorm = typeNorm === 'central' ? 'All' : (state ?? '');
 
     const scheme = await Scheme.create({
-      scheme_name: String(scheme_name).trim(),
-      scheme_type: typeNorm,
-      state: state ?? '',
+      name:        String(name).trim(),
+      state:       stateNorm,
+      type:        typeNorm,
+      category:    category    ?? '',
       description: description ?? '',
-      benefits: Array.isArray(benefits) ? benefits : [],
-      application_link: application_link ?? '',
-      last_date: last_date ?? '',
-      createdBy: req.user.sub,
+      benefits:    Array.isArray(benefits)    ? benefits    : [],
+      eligibility: Array.isArray(eligibility) ? eligibility : [],
+      documents:   Array.isArray(documents)   ? documents   : [],
+      deadline:    deadline    ?? '',
+      applyLink:   applyLink   ?? '',
+      source:      'official',
+      confidence:  1.0,
+      isAiGenerated: false,
+      approved:    true,
+      fetchedAt:      new Date(),
+      lastVerifiedAt: new Date(),
     });
 
-    const json = scheme.toJSON();
-    return res.status(201).json({
-      id: json.id,
-      scheme_name: json.scheme_name,
-      scheme_type: json.scheme_type,
-      state: json.state,
-      basic_info: json.basic_info,
-      benefits: json.benefits,
-      application_link: json.application_link,
-      last_date: json.last_date,
-    });
+    return res.status(201).json(schemeResponse(scheme));
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Failed to create scheme' });
   }
 }
 
-async function listByType(req, res) {
+// ─── PUT /api/schemes/:id  (admin: update) ───────────────────────────────────
+async function update(req, res) {
   try {
-    const raw = (req.params.type || '').toLowerCase();
-    const scheme_type = raw.includes('central') ? 'Central' : 'State';
-    const schemes = await Scheme.find({ scheme_type }).sort({ createdAt: -1 }).lean();
-    const mapped = schemes.map((s) => ({
-      id: s._id.toString(),
-      scheme_name: s.scheme_name,
-      scheme_type: s.scheme_type,
-      state: s.state ?? '',
-      basic_info: s.description ?? '',
-      benefits: s.benefits ?? [],
-      application_link: s.application_link ?? '',
-      last_date: s.last_date ?? '',
-    }));
-    return res.json(mapped);
+    const scheme = await Scheme.findByIdAndUpdate(
+      req.params.id,
+      { ...req.body, lastVerifiedAt: new Date() },
+      { new: true }
+    );
+    if (!scheme) return res.status(404).json({ message: 'Scheme not found' });
+    return res.json(schemeResponse(scheme));
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Failed to filter schemes' });
+    return res.status(500).json({ message: 'Failed to update scheme' });
   }
 }
 
-async function listByState(req, res) {
+// ─── DELETE /api/schemes/:id  (admin: remove) ────────────────────────────────
+async function remove(req, res) {
   try {
-    const state = decodeURIComponent(req.params.state || '').trim();
-    if (!state) {
-      return res.status(400).json({ message: 'state is required' });
-    }
-    const schemes = await Scheme.find({
-      scheme_type: 'State',
-      state: new RegExp(`^${state.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i'),
-    })
-      .sort({ createdAt: -1 })
-      .lean();
-
-    const mapped = schemes.map((s) => ({
-      id: s._id.toString(),
-      scheme_name: s.scheme_name,
-      scheme_type: s.scheme_type,
-      state: s.state ?? '',
-      basic_info: s.description ?? '',
-      benefits: s.benefits ?? [],
-      application_link: s.application_link ?? '',
-      last_date: s.last_date ?? '',
-    }));
-    return res.json(mapped);
+    const scheme = await Scheme.findByIdAndDelete(req.params.id);
+    if (!scheme) return res.status(404).json({ message: 'Scheme not found' });
+    return res.json({ message: 'Scheme deleted' });
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ message: 'Failed to filter schemes by state' });
+    return res.status(500).json({ message: 'Failed to delete scheme' });
   }
 }
 
-module.exports = { listAll, create, listByType, listByState };
+module.exports = { listAll, getSmartSchemes: getSmartSchemesHandler, create, update, remove };

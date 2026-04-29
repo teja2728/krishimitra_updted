@@ -1,22 +1,38 @@
-const Bookmark = require('../models/Bookmark');
+const UserScheme = require('../models/UserScheme');
 
 async function toggle(req, res) {
   try {
-    const { schemeId } = req.body;
-    if (!schemeId || !String(schemeId).trim()) {
+    const { schemeId, reminderDate } = req.body;
+    if (!schemeId) {
       return res.status(400).json({ message: 'schemeId is required' });
     }
-    const sid = String(schemeId).trim();
     const userId = req.user.sub;
 
-    const existing = await Bookmark.findOne({ userId, schemeId: sid });
-    if (existing) {
-      await existing.deleteOne();
-      return res.json({ schemeId: sid, bookmarked: false });
+    let userScheme = await UserScheme.findOne({ userId, schemeId });
+    
+    if (userScheme) {
+      // Toggle if no reminder is explicitly passed, otherwise update
+      if (reminderDate !== undefined) {
+        userScheme.reminderDate = reminderDate;
+        if (reminderDate) userScheme.bookmarked = true; // Auto-bookmark if reminding
+      } else {
+        userScheme.bookmarked = !userScheme.bookmarked;
+      }
+      await userScheme.save();
+    } else {
+      userScheme = await UserScheme.create({
+        userId,
+        schemeId,
+        bookmarked: true,
+        reminderDate: reminderDate || null
+      });
     }
 
-    await Bookmark.create({ userId, schemeId: sid });
-    return res.json({ schemeId: sid, bookmarked: true });
+    return res.json({ 
+      schemeId, 
+      bookmarked: userScheme.bookmarked,
+      reminderDate: userScheme.reminderDate
+    });
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Bookmark update failed' });
@@ -34,9 +50,9 @@ async function listByUser(req, res) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    const rows = await Bookmark.find({ userId }).lean();
-    const schemeIds = rows.map((r) => r.schemeId);
-    return res.json({ schemeIds });
+    // Populate scheme details
+    const rows = await UserScheme.find({ userId, bookmarked: true }).populate('schemeId').lean();
+    return res.json(rows);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Failed to load bookmarks' });

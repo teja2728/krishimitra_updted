@@ -31,7 +31,7 @@ class SchemesRepository {
   }
 
   List<Scheme> filterByType(List<Scheme> schemes, SchemeType type) {
-    return schemes.where((s) => s.schemeType == type).toList(growable: false);
+    return schemes.where((s) => s.type == type).toList(growable: false);
   }
 
   Future<List<Scheme>> fetchSchemesWithAdminOverrides() async {

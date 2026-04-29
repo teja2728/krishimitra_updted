@@ -22,9 +22,9 @@ function userResponse(doc) {
     mobile: json.mobile,
     state: json.state,
     language: json.language,
-    cropTypes: json.cropTypes,
+    crops: json.crops,
     soilType: json.soilType,
-    acres: json.acres,
+    landSize: json.landSize,
     role: json.role,
   };
 }
@@ -37,9 +37,9 @@ async function register(req, res) {
       password,
       state,
       language,
-      cropTypes,
+      crops,
       soilType,
-      acres,
+      landSize,
     } = req.body;
 
     if (!name || !mobile || !password) {
@@ -58,9 +58,9 @@ async function register(req, res) {
       password: hashed,
       state: state ?? '',
       language: language ?? '',
-      cropTypes: Array.isArray(cropTypes) ? cropTypes : [],
+      crops: Array.isArray(crops) ? crops : [],
       soilType: soilType ?? '',
-      acres: Number(acres) || 0,
+      landSize: Number(landSize) || 0,
       role: 'user',
     });
 
@@ -141,4 +141,35 @@ async function adminLogin(req, res) {
   }
 }
 
-module.exports = { register, login, adminLogin };
+async function updateProfile(req, res) {
+  try {
+    const userId = req.user.sub;
+    const { name, state, language, crops, soilType, landSize } = req.body;
+
+    const user = await User.findByIdAndUpdate(
+      userId,
+      {
+        $set: {
+          ...(name !== undefined && { name: String(name).trim() }),
+          ...(state !== undefined && { state }),
+          ...(language !== undefined && { language }),
+          ...(Array.isArray(crops) && { crops }),
+          ...(soilType !== undefined && { soilType }),
+          ...(landSize !== undefined && { landSize: Number(landSize) || 0 }),
+        },
+      },
+      { new: true }
+    );
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    return res.json({ user: userResponse(user) });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Profile update failed' });
+  }
+}
+
+module.exports = { register, login, adminLogin, updateProfile };

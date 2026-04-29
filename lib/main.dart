@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'app/app_router.dart';
 import 'app/app_theme.dart';
 
 void main() {
-  runApp(
-    const ProviderScope(
-      child: KrishiMitraApp(),
-    ),
-  );
+  WidgetsFlutterBinding.ensureInitialized();
+  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+    statusBarColor: Colors.transparent,
+    statusBarIconBrightness: Brightness.light,
+  ));
+  runApp(const ProviderScope(child: KrishiMitraApp()));
 }
 
 class KrishiMitraApp extends StatelessWidget {
@@ -21,6 +23,8 @@ class KrishiMitraApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'KrishiMitra',
       theme: AppTheme.lightTheme(),
+      darkTheme: AppTheme.darkTheme(),
+      themeMode: ThemeMode.dark,   // Dark-first
       routerConfig: appRouter,
     );
   }

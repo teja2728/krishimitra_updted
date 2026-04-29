@@ -5,71 +5,86 @@ enum SchemeType {
 
 class Scheme {
   final String id;
-  final String schemeName;
-  final SchemeType schemeType;
-  final String state; // State name for state schemes; empty for central.
-  final String basicInfo;
+  final String name;
+  final SchemeType type;
+  final String state;
+  final String category;
+  final String description;
   final List<String> benefits;
-  final String applicationLink;
-  final String lastDate;
+  final List<String> eligibility;
+  final List<String> documents;
+  final String deadline;
+  final String applyLink;
+  final bool isAiGenerated;
+  final bool approved;
 
   const Scheme({
     required this.id,
-    required this.schemeName,
-    required this.schemeType,
+    required this.name,
+    required this.type,
     required this.state,
-    required this.basicInfo,
+    required this.category,
+    required this.description,
     required this.benefits,
-    required this.applicationLink,
-    required this.lastDate,
+    required this.eligibility,
+    required this.documents,
+    required this.deadline,
+    required this.applyLink,
+    required this.isAiGenerated,
+    required this.approved,
   });
 
   static SchemeType parseSchemeType(String raw) {
     final lower = raw.toLowerCase();
     if (lower.contains('central')) return SchemeType.central;
     if (lower.contains('state')) return SchemeType.state;
-    // Fallback: treat unknown as state.
     return SchemeType.state;
   }
 
   factory Scheme.fromJson(Map<String, dynamic> json) {
-    final rawType = (json['scheme_type'] ?? '').toString();
+    final rawType = (json['type'] ?? '').toString();
     final rawId = (json['id'] ?? json['_id'] ?? '').toString();
-    final basic = (json['basic_info'] ?? json['description'] ?? '').toString();
+    
     return Scheme(
-      id: rawId.isNotEmpty ? rawId : (json['scheme_name'] ?? '').toString(),
-      schemeName: (json['scheme_name'] ?? '').toString(),
-      schemeType: parseSchemeType(rawType),
+      id: rawId.isNotEmpty ? rawId : (json['name'] ?? '').toString(),
+      name: (json['name'] ?? '').toString(),
+      type: parseSchemeType(rawType),
       state: (json['state'] ?? '').toString(),
-      basicInfo: basic,
+      category: (json['category'] ?? '').toString(),
+      description: (json['description'] ?? '').toString(),
       benefits: (json['benefits'] as List? ?? const []).map((e) => e.toString()).toList(),
-      applicationLink: (json['application_link'] ?? '').toString(),
-      lastDate: (json['last_date'] ?? '').toString(),
+      eligibility: (json['eligibility'] as List? ?? const []).map((e) => e.toString()).toList(),
+      documents: (json['documents'] as List? ?? const []).map((e) => e.toString()).toList(),
+      deadline: (json['deadline'] ?? '').toString(),
+      applyLink: (json['applyLink'] ?? '').toString(),
+      isAiGenerated: json['isAiGenerated'] == true,
+      approved: json['approved'] != false, // Default true
     );
   }
 
   Map<String, dynamic> toJson() => {
         'id': id,
-        'scheme_name': schemeName,
-        'scheme_type': schemeType == SchemeType.central ? 'Central' : 'State',
+        'name': name,
+        'type': type == SchemeType.central ? 'central' : 'state',
         'state': state,
-        'basic_info': basicInfo,
+        'category': category,
+        'description': description,
         'benefits': benefits,
-        'application_link': applicationLink,
-        'last_date': lastDate,
+        'eligibility': eligibility,
+        'documents': documents,
+        'deadline': deadline,
+        'applyLink': applyLink,
+        'isAiGenerated': isAiGenerated,
+        'approved': approved,
       };
 
-  /// For [SchemeType.state] rows: matches [farmerState] (case-insensitive).
-  /// Schemes with state `"All"` match every farmer. If [farmerState] is empty,
-  /// nothing is filtered out (show all state schemes).
   bool matchesFarmerState(String farmerState) {
-    if (schemeType != SchemeType.state) return true;
+    if (type != SchemeType.state) return true;
     final schemeState = state.trim().toLowerCase();
-    if (schemeState == 'all') return true;
+    if (schemeState == 'all india' || schemeState == 'all') return true;
     final farmer = farmerState.trim().toLowerCase();
     if (farmer.isEmpty) return true;
     if (schemeState.isEmpty) return false;
     return schemeState == farmer;
   }
 }
-

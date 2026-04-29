@@ -10,6 +10,7 @@ class LocalUserStorage {
   static const String _roleKey = 'krishi_mitra_role';
   static const String _jwtKey = 'krishi_mitra_jwt';
   static const String _backendUserIdKey = 'krishi_mitra_backend_user_id';
+  static const String _offlineSchemesKey = 'krishi_mitra_offline_schemes'; // For offline caching
 
   Future<void> saveUserAuth(UserAuthData data) async {
     final prefs = await SharedPreferences.getInstance();
@@ -34,6 +35,7 @@ class LocalUserStorage {
     await prefs.remove(_roleKey);
     await prefs.remove(_jwtKey);
     await prefs.remove(_backendUserIdKey);
+    await prefs.remove(_offlineSchemesKey);
   }
 
   Future<void> saveSession({
@@ -49,6 +51,7 @@ class LocalUserStorage {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_jwtKey);
     await prefs.remove(_backendUserIdKey);
+    await prefs.remove(_roleKey); // Ensure role is cleared on logout
   }
 
   Future<String?> readJwtToken() async {
@@ -75,15 +78,12 @@ class LocalUserStorage {
     return AuthRole.fromString(prefs.getString(_roleKey));
   }
 
-  /// Updates the saved profile while preserving the existing password.
-  /// This is a local/mock-only implementation for the current stage.
   Future<void> updateProfile(UserProfile profile) async {
     final existing = await readUserAuth();
     if (existing == null) {
-      // If no user exists yet, just save what we were given.
       await saveUserAuth(
         UserAuthData(
-          mobileNumber: profile.mobileNumber,
+          mobile: profile.mobile,
           password: '',
           profile: profile,
         ),
@@ -93,11 +93,21 @@ class LocalUserStorage {
 
     await saveUserAuth(
       UserAuthData(
-        mobileNumber: profile.mobileNumber,
+        mobile: profile.mobile,
         password: existing.password,
         profile: profile,
       ),
     );
   }
-}
 
+  // Offline support caching
+  Future<void> saveOfflineSchemes(String jsonStr) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_offlineSchemesKey, jsonStr);
+  }
+
+  Future<String?> getOfflineSchemes() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_offlineSchemesKey);
+  }
+}

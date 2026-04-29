@@ -401,21 +401,34 @@ const schemes = [
 const seedData = async () => {
   try {
     await mongoose.connect(process.env.MONGO_URI);
-
     console.log("MongoDB Connected");
 
-    // Optional: clear old data
-    await Scheme.deleteMany();
+    // Clear existing seeded data
+    await Scheme.deleteMany({});
+    console.log("Cleared existing schemes");
 
-    // Flatten one level if data was pasted as [[ {...}, ... ]]
-    const rows = schemes.flat();
+    // Map seed fields → Mongoose model fields
+    const rows = schemes.flat().map((s) => ({
+      name:          s.name        || s.scheme_name  || '',
+      type:         (s.type        || s.scheme_type  || 'state').toLowerCase(),
+      state:         s.state       || '',
+      category:      s.category    || 'subsidy',
+      description:   s.description || '',
+      benefits:      Array.isArray(s.benefits)    ? s.benefits    : [],
+      eligibility:   Array.isArray(s.eligibility) ? s.eligibility : [],
+      documents:     Array.isArray(s.documents)   ? s.documents   : [],
+      applyLink:     s.applyLink   || s.application_link || '',
+      deadline:      s.deadline    || s.last_date         || '',
+      isAiGenerated: false,
+      approved:      true,
+    }));
+
     await Scheme.insertMany(rows);
+    console.log(`✅ ${rows.length} schemes inserted successfully`);
 
-    console.log("Schemes inserted successfully");
-
-    process.exit();
+    process.exit(0);
   } catch (error) {
-    console.error(error);
+    console.error("Seed failed:", error);
     process.exit(1);
   }
 };

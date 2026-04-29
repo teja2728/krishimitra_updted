@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../data/app_constants.dart';
 import '../models/auth_role.dart';
 import '../models/user_profile.dart';
 import '../widgets/multi_select_chips.dart';
@@ -16,12 +18,12 @@ class AccountScreen extends ConsumerStatefulWidget {
 class _AccountScreenState extends ConsumerState<AccountScreen> {
   bool _isEditing = false;
 
-  final _nameController = TextEditingController();
+  final _nameController  = TextEditingController();
   final _acresController = TextEditingController();
 
-  String _selectedState = 'Karnataka';
-  String _selectedLanguage = 'English';
-  String _selectedSoilType = 'Black';
+  String _selectedState    = kIndianStates.first;
+  String _selectedLanguage = kLanguages.first;
+  String _selectedSoilType = kSoilTypes.first;
   final Set<String> _selectedCrops = {};
 
   @override
@@ -32,23 +34,29 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   void _loadProfileIntoForm(UserProfile profile) {
-    _nameController.text = profile.name;
-    _acresController.text = profile.numberOfAcres.toString();
-    _selectedState = profile.state;
-    _selectedLanguage = profile.language;
-    _selectedSoilType = profile.soilType;
+    _nameController.text  = profile.name;
+    _acresController.text = profile.landSize.toString();
+    _selectedState        = kIndianStates.contains(profile.state)
+        ? profile.state
+        : kIndianStates.first;
+    _selectedLanguage = kLanguages.contains(profile.language)
+        ? profile.language
+        : kLanguages.first;
+    _selectedSoilType = kSoilTypes.contains(profile.soilType)
+        ? profile.soilType
+        : kSoilTypes.first;
     _selectedCrops
       ..clear()
-      ..addAll(profile.cropTypes);
+      ..addAll(profile.crops);
   }
 
   Future<void> _save(UserProfile existing) async {
     final storage = ref.read(localUserStorageProvider);
+    final api     = ref.read(apiServiceProvider);
+    final name    = _nameController.text.trim();
+    final landSize = int.tryParse(_acresController.text.trim()) ?? 0;
 
-    final name = _nameController.text.trim();
-    final numberOfAcres = int.tryParse(_acresController.text.trim()) ?? 0;
-
-    if (name.isEmpty || numberOfAcres <= 0 || _selectedCrops.isEmpty) {
+    if (name.isEmpty || landSize <= 0 || _selectedCrops.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please fill valid profile details.')),
@@ -57,221 +65,229 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     }
 
     final updated = UserProfile(
-      mobileNumber: existing.mobileNumber,
-      name: name,
-      state: _selectedState,
+      id:       existing.id,
+      mobile:   existing.mobile,
+      name:     name,
+      state:    _selectedState,
       language: _selectedLanguage,
-      cropTypes: _selectedCrops.toList(growable: false),
+      crops:    _selectedCrops.toList(growable: false),
       soilType: _selectedSoilType,
-      numberOfAcres: numberOfAcres,
+      landSize: landSize,
+      role:     existing.role,
     );
 
     await storage.updateProfile(updated);
+    ref.invalidate(userProfileProvider);
     setState(() => _isEditing = false);
+
+    try {
+      final serverProfile = await api.updateProfile(updated);
+      await storage.updateProfile(serverProfile);
+      ref.invalidate(userProfileProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Profile updated successfully!')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Saved locally. Will sync when online.')),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final profileAsync = ref.watch(userProfileProvider);
-    final roleAsync = ref.watch(authRoleProvider);
-
-    const soilTypes = ['Black', 'Red'];
-    const cropOptions = [
-      'Rice',
-      'Wheat',
-      'Cotton',
-      'Maize',
-      'Pulses',
-      'Sugarcane',
-      'Potato',
-      'Onion',
-      'Tomato',
-    ];
-    const states = [
-      'Karnataka',
-      'Maharashtra',
-      'Telangana',
-      'Andhra Pradesh',
-      'Uttar Pradesh',
-      'Gujarat',
-      'West Bengal',
-      'Rajasthan',
-      'Punjab',
-      'Tamil Nadu',
-    ];
-    const languages = [
-      'English',
-      'Hindi',
-      'Kannada',
-      'Telugu',
-      'Marathi',
-      'Tamil',
-      'Gujarati',
-      'Bengali',
-      'Punjabi',
-    ];
+    final roleAsync    = ref.watch(authRoleProvider);
+    final isDark       = Theme.of(context).brightness == Brightness.dark;
+    final tt           = Theme.of(context).textTheme;
 
     return Scaffold(
-      body: SafeArea(
-        child: profileAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (err, _) => Center(child: Text('Failed to load: $err')),
-          data: (profile) {
-            if (profile == null) {
-              return roleAsync.when(
-                loading: () => const Center(
-                  child: CircularProgressIndicator(),
-                ),
-                error: (err, _) => Center(
-                  child: Text('Failed to load account: $err'),
-                ),
-                data: (role) {
-                  if (role == AuthRole.admin) {
-                    return const Center(
-                      child: Text(
-                        'Admin account (mock). Register a user to edit farmer profile.',
-                        textAlign: TextAlign.center,
-                      ),
-                    );
-                  }
+      body: profileAsync.when(
+        loading: () => const Center(
+            child: CircularProgressIndicator(color: AppTheme.primary)),
+        error: (err, _) =>
+            Center(child: Text('Failed to load profile: $err')),
+        data: (profile) {
+          if (profile == null) {
+            return const Center(child: Text('No profile found.'));
+          }
 
-                  return const Center(
-                    child: Text(
-                      'No user profile found. Please register/login first.',
-                      textAlign: TextAlign.center,
+          final isAdmin = roleAsync.valueOrNull == AuthRole.admin;
+
+          return SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 32),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // ── Profile hero ────────────────────────────────────────
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        AppTheme.primary.withOpacity(0.15),
+                        const Color(0xFF00A3FF).withOpacity(0.08),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
                     ),
-                  );
-                },
-              );
-            }
-
-            if (!_isEditing) {
-              return Padding(
-                padding: const EdgeInsets.all(16),
-                child: ListView(
-                  children: [
-                    Text(
-                      'Account',
-                      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                        color: AppTheme.primary.withOpacity(0.2)),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          gradient: AppTheme.primaryGradient,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primary.withOpacity(0.3),
+                              blurRadius: 16,
+                              spreadRadius: 1,
+                            ),
+                          ],
+                        ),
+                        child: Center(
+                          child: Text(
+                            profile.name.isNotEmpty
+                                ? profile.name[0].toUpperCase()
+                                : '?',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w800,
+                            ),
                           ),
-                    ),
-                    const SizedBox(height: 12),
-                    Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(14),
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Profile Details',
-                              style: TextStyle(
-                                fontWeight: FontWeight.w700,
+                            Text(profile.name,
+                                style: tt.titleMedium?.copyWith(
+                                    fontWeight: FontWeight.w700)),
+                            const SizedBox(height: 4),
+                            Text(profile.mobile, style: tt.bodySmall),
+                            const SizedBox(height: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: isAdmin
+                                    ? Colors.orange.withOpacity(0.15)
+                                    : AppTheme.primary.withOpacity(0.12),
+                                borderRadius: BorderRadius.circular(6),
                               ),
-                            ),
-                            const SizedBox(height: 10),
-                            Text('Mobile: ${profile.mobileNumber}'),
-                            const SizedBox(height: 6),
-                            Text('Name: ${profile.name}'),
-                            const SizedBox(height: 6),
-                            Text('State: ${profile.state}'),
-                            const SizedBox(height: 6),
-                            Text('Language: ${profile.language}'),
-                            const SizedBox(height: 6),
-                            Text('Soil Type: ${profile.soilType}'),
-                            const SizedBox(height: 6),
-                            Text('Acres: ${profile.numberOfAcres}'),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              children: profile.cropTypes
-                                  .map((c) => Chip(label: Text(c)))
-                                  .toList(),
+                              child: Text(
+                                isAdmin ? 'Admin' : 'Farmer',
+                                style: tt.labelSmall?.copyWith(
+                                  color: isAdmin
+                                      ? Colors.orange
+                                      : AppTheme.primary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
                             ),
                           ],
                         ),
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: () {
-                          _loadProfileIntoForm(profile);
-                          setState(() => _isEditing = true);
-                        },
-                        icon: const Icon(Icons.edit),
-                        label: const Text('Edit'),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            // Edit mode
-            return Padding(
-              padding: const EdgeInsets.all(16),
-              child: ListView(
-                children: [
-                  Text(
-                    'Edit Account',
-                    style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
+                      if (!_isEditing)
+                        IconButton(
+                          tooltip: 'Edit profile',
+                          onPressed: () {
+                            _loadProfileIntoForm(profile);
+                            setState(() => _isEditing = true);
+                          },
+                          style: IconButton.styleFrom(
+                            backgroundColor:
+                                AppTheme.primary.withOpacity(0.12),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                          ),
+                          icon: const Icon(Icons.edit_rounded,
+                              size: 18, color: AppTheme.primary),
                         ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                if (!_isEditing) ...[
+                  // ── View mode: info cards ────────────────────────────
+                  Text('Profile Details',
+                      style: tt.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 12),
+                  _InfoGrid(profile: profile, isDark: isDark),
+                ] else ...[
+                  // ── Edit mode ────────────────────────────────────────
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Edit Profile',
+                          style: tt.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700)),
+                      TextButton(
+                        onPressed: () =>
+                            setState(() => _isEditing = false),
+                        child: const Text('Cancel'),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 12),
-                  TextFormField(
-                    initialValue: profile.mobileNumber,
-                    enabled: false,
-                    decoration: const InputDecoration(
-                      labelText: 'Mobile Number',
-                      prefixIcon: Icon(Icons.phone),
-                    ),
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
+                  _EditField(
                     controller: _nameController,
-                    decoration: const InputDecoration(
-                      labelText: 'Name',
-                      prefixIcon: Icon(Icons.person),
-                    ),
+                    label: 'Name',
+                    icon: Icons.person_rounded,
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedState,
-                    decoration: const InputDecoration(
-                      labelText: 'State',
-                      prefixIcon: Icon(Icons.location_city),
-                    ),
-                    items: states
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _selectedState = value);
-                    },
+                  _PremiumDropdown<String>(
+                    label: 'State',
+                    icon: Icons.location_city_rounded,
+                    value: _selectedState,
+                    items: kIndianStates,
+                    onChanged: (v) =>
+                        setState(() => _selectedState = v!),
                   ),
                   const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedLanguage,
-                    decoration: const InputDecoration(
-                      labelText: 'Language',
-                      prefixIcon: Icon(Icons.translate),
-                    ),
-                    items: languages
-                        .map((s) =>
-                            DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _selectedLanguage = value);
-                    },
+                  _PremiumDropdown<String>(
+                    label: 'Language',
+                    icon: Icons.translate_rounded,
+                    value: _selectedLanguage,
+                    items: kLanguages,
+                    onChanged: (v) =>
+                        setState(() => _selectedLanguage = v!),
                   ),
                   const SizedBox(height: 14),
+                  _PremiumDropdown<String>(
+                    label: 'Soil Type',
+                    icon: Icons.landscape_rounded,
+                    value: _selectedSoilType,
+                    items: kSoilTypes,
+                    onChanged: (v) =>
+                        setState(() => _selectedSoilType = v!),
+                  ),
+                  const SizedBox(height: 14),
+                  _EditField(
+                    controller: _acresController,
+                    label: 'Land Size (Acres)',
+                    icon: Icons.grain_rounded,
+                    inputType: TextInputType.number,
+                  ),
+                  const SizedBox(height: 16),
                   MultiSelectChips(
-                    label: 'Crop Type (Multi-select)',
-                    options: cropOptions,
+                    label: 'Crop Types',
+                    options: kCropOptions,
                     selected: _selectedCrops,
                     onChanged: (next) => setState(() {
                       _selectedCrops
@@ -279,60 +295,213 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                         ..addAll(next);
                     }),
                   ),
-                  const SizedBox(height: 14),
-                  DropdownButtonFormField<String>(
-                    initialValue: _selectedSoilType,
-                    decoration: const InputDecoration(
-                      labelText: 'Soil Type',
-                      prefixIcon: Icon(Icons.grain),
-                    ),
-                    items: soilTypes
-                        .map((s) => DropdownMenuItem(value: s, child: Text(s)))
-                        .toList(),
-                    onChanged: (value) {
-                      if (value == null) return;
-                      setState(() => _selectedSoilType = value);
-                    },
-                  ),
-                  const SizedBox(height: 14),
-                  TextFormField(
-                    controller: _acresController,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Number of Acres',
-                      prefixIcon: Icon(Icons.landscape),
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            _loadProfileIntoForm(profile);
-                            setState(() => _isEditing = false);
-                          },
-                          icon: const Icon(Icons.cancel),
-                          label: const Text('Cancel'),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 52,
+                    child: GestureDetector(
+                      onTap: () => _save(profile),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: AppTheme.primaryGradient,
+                          borderRadius: BorderRadius.circular(14),
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.primary.withOpacity(0.35),
+                              blurRadius: 14,
+                              offset: const Offset(0, 5),
+                            ),
+                          ],
                         ),
+                        alignment: Alignment.center,
+                        child: const Text('Save Changes',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            )),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: () => _save(profile),
-                          icon: const Icon(Icons.save),
-                          label: const Text('Save'),
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ],
-              ),
-            );
-          },
-        ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
 }
 
+// ─── Info grid view ───────────────────────────────────────────────────────────
+class _InfoGrid extends StatelessWidget {
+  final UserProfile profile;
+  final bool isDark;
+
+  const _InfoGrid({required this.profile, required this.isDark});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      ('State', profile.state, Icons.location_city_rounded),
+      ('Language', profile.language, Icons.translate_rounded),
+      ('Soil Type', profile.soilType, Icons.landscape_rounded),
+      ('Land Size', '${profile.landSize} acres', Icons.grain_rounded),
+    ];
+
+    return Column(
+      children: [
+        GridView.count(
+          crossAxisCount: 2,
+          crossAxisSpacing: 10,
+          mainAxisSpacing: 10,
+          childAspectRatio: 2.5,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          children: items.map((item) {
+            return Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: isDark ? AppTheme.surface : Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: isDark
+                      ? Colors.white.withOpacity(0.07)
+                      : Colors.black.withOpacity(0.06),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(item.$3,
+                      size: 18, color: AppTheme.primary),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Text(item.$1,
+                            style: Theme.of(context)
+                                .textTheme
+                                .labelSmall),
+                        Text(item.$2,
+                            style: Theme.of(context)
+                                .textTheme
+                                .bodySmall
+                                ?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                    color:
+                                        Theme.of(context).colorScheme.onSurface),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 12),
+        if (profile.crops.isNotEmpty) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text('Crops',
+                style: Theme.of(context)
+                    .textTheme
+                    .labelMedium
+                    ?.copyWith(fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: profile.crops
+                .map((c) => Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primary.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                            color: AppTheme.primary.withOpacity(0.25)),
+                      ),
+                      child: Text(c,
+                          style: Theme.of(context)
+                              .textTheme
+                              .labelSmall
+                              ?.copyWith(
+                                  color: AppTheme.primary,
+                                  fontWeight: FontWeight.w600)),
+                    ))
+                .toList(),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Edit field ───────────────────────────────────────────────────────────────
+class _EditField extends StatelessWidget {
+  final TextEditingController controller;
+  final String   label;
+  final IconData icon;
+  final TextInputType inputType;
+
+  const _EditField({
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.inputType = TextInputType.text,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      keyboardType: inputType,
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 20),
+      ),
+    );
+  }
+}
+
+// ─── Premium dropdown ─────────────────────────────────────────────────────────
+class _PremiumDropdown<T> extends StatelessWidget {
+  final String   label;
+  final IconData icon;
+  final T        value;
+  final List<T>  items;
+  final ValueChanged<T?> onChanged;
+
+  const _PremiumDropdown({
+    required this.label,
+    required this.icon,
+    required this.value,
+    required this.items,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return DropdownButtonFormField<T>(
+      value: items.contains(value) ? value : null,
+      style: Theme.of(context).textTheme.bodyMedium,
+      decoration: InputDecoration(
+        labelText: label,
+        prefixIcon: Icon(icon, size: 20),
+      ),
+      isExpanded: true,
+      items: items
+          .map((i) =>
+              DropdownMenuItem(value: i, child: Text(i.toString())))
+          .toList(),
+      onChanged: onChanged,
+    );
+  }
+}

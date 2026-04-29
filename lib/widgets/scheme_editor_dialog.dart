@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/app_constants.dart';
 import '../models/scheme.dart';
 
 class SchemeEditorDialog extends StatefulWidget {
@@ -14,11 +15,11 @@ class SchemeEditorDialog extends StatefulWidget {
 class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
   final _formKey = GlobalKey<FormState>();
 
-  late SchemeType _schemeType;
-  late String _schemeName;
-  late String _basicInfo;
-  late String _applicationLink;
-  late String _lastDate;
+  late SchemeType _type;
+  late String _name;
+  late String _description;
+  late String _applyLink;
+  late String _deadline;
   late String _state;
   late String _benefitsText;
 
@@ -26,12 +27,15 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
   void initState() {
     super.initState();
     final initial = widget.initial;
-    _schemeType = initial?.schemeType ?? SchemeType.state;
-    _schemeName = initial?.schemeName ?? '';
-    _basicInfo = initial?.basicInfo ?? '';
-    _applicationLink = initial?.applicationLink ?? '';
-    _lastDate = initial?.lastDate ?? '';
-    _state = initial?.state ?? '';
+    _type        = initial?.type ?? SchemeType.state;
+    _name        = initial?.name ?? '';
+    _description = initial?.description ?? '';
+    _applyLink   = initial?.applyLink ?? '';
+    _deadline    = initial?.deadline ?? '';
+    // Default to first state if no initial value
+    _state       = (initial?.state.trim().isNotEmpty == true)
+        ? initial!.state
+        : kIndianStates.first;
     _benefitsText = (initial?.benefits ?? const []).join('\n');
   }
 
@@ -54,7 +58,7 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
             shrinkWrap: true,
             children: [
               DropdownButtonFormField<SchemeType>(
-                initialValue: _schemeType,
+                initialValue: _type,
                 decoration: const InputDecoration(
                   labelText: 'Scheme Type',
                   prefixIcon: Icon(Icons.category),
@@ -71,12 +75,12 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
                 ],
                 onChanged: (value) {
                   if (value == null) return;
-                  setState(() => _schemeType = value);
+                  setState(() => _type = value);
                 },
               ),
               const SizedBox(height: 12),
               TextFormField(
-                initialValue: _schemeName,
+                initialValue: _name,
                 decoration: const InputDecoration(
                   labelText: 'Scheme Name',
                   prefixIcon: Icon(Icons.title),
@@ -86,27 +90,36 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
                   if (v.isEmpty) return 'Scheme name is required';
                   return null;
                 },
-                onChanged: (v) => _schemeName = v,
+                onChanged: (v) => _name = v,
               ),
               const SizedBox(height: 12),
-              if (_schemeType == SchemeType.state) ...[
-                TextFormField(
-                  initialValue: _state,
+              if (_type == SchemeType.state) ...[
+                DropdownButtonFormField<String>(
+                  value: kIndianStates.contains(_state)
+                      ? _state
+                      : kIndianStates.first,
                   decoration: const InputDecoration(
                     labelText: 'State',
                     prefixIcon: Icon(Icons.location_city),
                   ),
+                  items: kIndianStates
+                      .map((s) => DropdownMenuItem(value: s, child: Text(s)))
+                      .toList(),
                   validator: (value) {
-                    final v = value?.trim() ?? '';
-                    if (v.isEmpty) return 'State is required for State schemes';
+                    if (value == null || value.trim().isEmpty) {
+                      return 'State is required for State schemes';
+                    }
                     return null;
                   },
-                  onChanged: (v) => _state = v,
+                  onChanged: (v) {
+                    if (v == null) return;
+                    setState(() => _state = v);
+                  },
                 ),
                 const SizedBox(height: 12),
               ],
               TextFormField(
-                initialValue: _basicInfo,
+                initialValue: _description,
                 decoration: const InputDecoration(
                   labelText: 'Description (Basic Info)',
                   prefixIcon: Icon(Icons.description),
@@ -117,7 +130,7 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
                   if (v.isEmpty) return 'Description is required';
                   return null;
                 },
-                onChanged: (v) => _basicInfo = v,
+                onChanged: (v) => _description = v,
               ),
               const SizedBox(height: 12),
               TextFormField(
@@ -136,7 +149,7 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
               ),
               const SizedBox(height: 12),
               TextFormField(
-                initialValue: _applicationLink,
+                initialValue: _applyLink,
                 decoration: const InputDecoration(
                   labelText: 'Application Link (URL)',
                   prefixIcon: Icon(Icons.link),
@@ -146,11 +159,11 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
                   if (v.isEmpty) return 'Application link is required';
                   return null;
                 },
-                onChanged: (v) => _applicationLink = v,
+                onChanged: (v) => _applyLink = v,
               ),
               const SizedBox(height: 12),
               TextFormField(
-                initialValue: _lastDate,
+                initialValue: _deadline,
                 decoration: const InputDecoration(
                   labelText: 'Last Date',
                   prefixIcon: Icon(Icons.date_range),
@@ -160,7 +173,7 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
                   if (v.isEmpty) return 'Last date is required';
                   return null;
                 },
-                onChanged: (v) => _lastDate = v,
+                onChanged: (v) => _deadline = v,
               ),
             ],
           ),
@@ -182,13 +195,18 @@ class _SchemeEditorDialogState extends State<SchemeEditorDialog> {
 
             final updated = Scheme(
               id: id,
-              schemeName: _schemeName.trim(),
-              schemeType: _schemeType,
-              state: _schemeType == SchemeType.state ? _state.trim() : '',
-              basicInfo: _basicInfo.trim(),
+              name: _name.trim(),
+              type: _type,
+              state: _type == SchemeType.state ? _state.trim() : '',
+              category: initial?.category ?? 'subsidy', // Fallback for new schemes
+              description: _description.trim(),
               benefits: _parseBenefits(_benefitsText),
-              applicationLink: _applicationLink.trim(),
-              lastDate: _lastDate.trim(),
+              eligibility: initial?.eligibility ?? [],
+              documents: initial?.documents ?? [],
+              applyLink: _applyLink.trim(),
+              deadline: _deadline.trim(),
+              isAiGenerated: initial?.isAiGenerated ?? false,
+              approved: initial?.approved ?? true,
             );
             Navigator.pop(context, updated);
           },

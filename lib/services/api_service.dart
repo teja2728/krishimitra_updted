@@ -9,13 +9,6 @@ import '../models/scheme.dart';
 import '../models/user_profile.dart';
 import 'local_user_storage.dart';
 
-/// Base URL for KrishiMitra REST API (Express on port 5000).
-///
-/// Replaces loading `lib/data/schemes.json` from the asset bundle: the app
-/// should call `GET …/schemes` instead, e.g. on **Android emulator**:
-/// `http.get(Uri.parse('http://10.0.2.2:5000/api/schemes'))` — `10.0.2.2` is
-/// the host loopback from the emulator. On **web / desktop / iOS simulator**
-/// use `http://localhost:5000/api` (see [fetchSchemes]).
 String resolveApiBaseUrl() {
   if (kIsWeb) return 'http://localhost:5000/api';
   if (defaultTargetPlatform == TargetPlatform.android) {
@@ -93,13 +86,13 @@ class ApiService {
       headers: await _headers(),
       body: jsonEncode({
         'name': profile.name,
-        'mobile': profile.mobileNumber,
+        'mobile': profile.mobile,
         'password': data.password,
         'state': profile.state,
         'language': profile.language,
-        'cropTypes': profile.cropTypes,
+        'crops': profile.crops,
         'soilType': profile.soilType,
-        'acres': profile.numberOfAcres,
+        'landSize': profile.landSize,
       }),
     );
     _throwIfError(res);
@@ -159,25 +152,47 @@ class ApiService {
     return AuthResponse(token: token, userId: userId, userJson: user);
   }
 
-  /// `GET /schemes` — same as `http.get(Uri.parse('http://10.0.2.2:5000/api/schemes'))`
-  /// on Android; uses [resolveApiBaseUrl] so other platforms hit `localhost`.
+  // Fetch schemes using the new /smart endpoint
   Future<List<Scheme>> fetchSchemes() async {
-    final res = await _client.get(
-      _uri('/schemes'),
-      headers: await _headers(),
-    );
-    _throwIfError(res);
-    final decoded = jsonDecode(res.body);
-    if (decoded is! List) {
-      throw ApiException('Invalid schemes payload');
+    try {
+      final res = await _client.get(
+        _uri('/schemes/smart'),
+        headers: await _headers(auth: true),
+      );
+      _throwIfError(res);
+      var decoded = jsonDecode(res.body);
+      
+      // Handle fallback response format { message: '...', data: [...] }
+      if (decoded is Map<String, dynamic> && decoded.containsKey('data')) {
+        decoded = decoded['data'];
+      }
+      
+      // Save for offline
+      await _storage.saveOfflineSchemes(jsonEncode(decoded));
+
+      if (decoded is! List) {
+        throw ApiException('Invalid schemes payload');
+      }
+      return decoded
+          .whereType<Map<String, dynamic>>()
+          .map(Scheme.fromJson)
+          .toList(growable: false);
+    } catch (e) {
+      // Offline fallback
+      final offlineData = await _storage.getOfflineSchemes();
+      if (offlineData != null) {
+        final decoded = jsonDecode(offlineData);
+        if (decoded is List) {
+          return decoded
+              .whereType<Map<String, dynamic>>()
+              .map(Scheme.fromJson)
+              .toList(growable: false);
+        }
+      }
+      rethrow;
     }
-    return decoded
-        .whereType<Map<String, dynamic>>()
-        .map(Scheme.fromJson)
-        .toList(growable: false);
   }
 
-  /// Toggles bookmark on the server for the authenticated user.
   Future<void> bookmarkScheme(String schemeId) async {
     final res = await _client.post(
       _uri('/bookmark'),
@@ -193,9 +208,16 @@ class ApiService {
       headers: await _headers(auth: true),
     );
     _throwIfError(res);
-    final map = jsonDecode(res.body) as Map<String, dynamic>;
-    final list = map['schemeIds'] as List? ?? const [];
-    return list.map((e) => e.toString()).toSet();
+    final list = jsonDecode(res.body) as List? ?? const [];
+    // The new response returns array of UserScheme docs. Extract schemeId.id or just schemeId
+    return list.map((e) {
+      if (e is Map) {
+        final scheme = e['schemeId'];
+        if (scheme is Map) return scheme['id']?.toString() ?? '';
+        return scheme?.toString() ?? '';
+      }
+      return e.toString();
+    }).toSet();
   }
 
   Future<void> sendFeedback(String message) async {
@@ -220,20 +242,41 @@ class ApiService {
     return decoded.whereType<Map<String, dynamic>>().toList(growable: false);
   }
 
+  Future<UserProfile> updateProfile(UserProfile profile) async {
+    final res = await _client.put(
+      _uri('/auth/profile'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({
+        'name': profile.name,
+        'state': profile.state,
+        'language': profile.language,
+        'crops': profile.crops,
+        'soilType': profile.soilType,
+        'landSize': profile.landSize,
+      }),
+    );
+    _throwIfError(res);
+    final map = jsonDecode(res.body) as Map<String, dynamic>;
+    final userJson = map['user'] as Map<String, dynamic>? ?? {};
+    return userProfileFromApiUser(userJson);
+  }
+
   void close() => _client.close();
 }
 
 UserProfile userProfileFromApiUser(Map<String, dynamic> u) {
   return UserProfile(
-    mobileNumber: (u['mobile'] ?? '').toString(),
+    id: (u['id'] ?? '').toString(),
+    mobile: (u['mobile'] ?? '').toString(),
     name: (u['name'] ?? '').toString(),
     state: (u['state'] ?? '').toString(),
     language: (u['language'] ?? '').toString(),
-    cropTypes: (u['cropTypes'] as List? ?? const [])
+    crops: (u['crops'] as List? ?? const [])
         .map((e) => e.toString())
         .toList(),
     soilType: (u['soilType'] ?? '').toString(),
-    numberOfAcres: int.tryParse((u['acres'] ?? 0).toString()) ?? 0,
+    landSize: int.tryParse((u['landSize'] ?? 0).toString()) ?? 0,
+    role: (u['role'] ?? 'user').toString(),
   );
 }
 

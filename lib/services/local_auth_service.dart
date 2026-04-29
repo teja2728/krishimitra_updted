@@ -13,20 +13,22 @@ class LocalAuthService {
   static const String adminPassword = 'admin123';
 
   UserAuthData _normalizeAuth(UserAuthData data) {
-    final mobile = data.mobileNumber.trim();
+    final mobile = data.mobile.trim();
     final password = data.password.trim();
     final p = data.profile;
     final profile = UserProfile(
-      mobileNumber: mobile,
+      id: p.id,
+      mobile: mobile,
       name: p.name.trim(),
       state: p.state,
       language: p.language,
-      cropTypes: p.cropTypes,
+      crops: p.crops,
       soilType: p.soilType,
-      numberOfAcres: p.numberOfAcres,
+      landSize: p.landSize,
+      role: p.role,
     );
     return UserAuthData(
-      mobileNumber: mobile,
+      mobile: mobile,
       password: password,
       profile: profile,
     );
@@ -41,94 +43,91 @@ class LocalAuthService {
       final role = authRoleFromApiUser(res.userJson);
       await _storage.saveUserAuth(
         UserAuthData(
-          mobileNumber: profile.mobileNumber.trim(),
+          mobile: profile.mobile.trim(),
           password: normalized.password,
           profile: profile,
         ),
       );
       await _storage.saveRole(role);
     } catch (_) {
-      await _storage.saveUserAuth(normalized);
+      throw const AuthException('Registration failed on server.');
     }
   }
 
-  /// Returns user profile if credentials match; throws otherwise.
   Future<UserProfile> loginUser({
-    required String mobileNumber,
+    required String mobile,
     required String password,
   }) async {
-    final mobile = mobileNumber.trim();
+    final mob = mobile.trim();
     final pwd = password.trim();
     try {
-      final res = await _api.login(mobile: mobile, password: pwd);
+      final res = await _api.login(mobile: mob, password: pwd);
+      
+      // Fix logout bug: Ensure a clean session start
+      await _storage.clearSession();
+      
       await _storage.saveSession(token: res.token, userId: res.userId);
       final profile = userProfileFromApiUser(res.userJson);
       await _storage.saveUserAuth(
         UserAuthData(
-          mobileNumber: profile.mobileNumber.trim(),
+          mobile: profile.mobile.trim(),
           password: pwd,
           profile: profile,
         ),
       );
       await _storage.saveRole(authRoleFromApiUser(res.userJson));
       return profile;
-    } catch (_) {
-      final userAuth = await _storage.readUserAuth();
-      if (userAuth == null) {
-        throw const AuthException(
-          'No saved account on this device. Register again with the backend running, '
-          'and in Atlas open your app database (e.g. krishimitra) → users — not sample_mflix.',
-        );
+    } catch (e) {
+      if (e is ApiException) {
+        throw AuthException(e.message);
       }
-
-      if (userAuth.mobileNumber.trim() != mobile ||
-          userAuth.password.trim() != pwd) {
-        throw const AuthException('Invalid mobile number or password.');
-      }
-
-      await _storage.clearSession();
-      await _storage.saveRole(AuthRole.user);
-      return userAuth.profile;
+      throw const AuthException('Invalid mobile number or password.');
     }
   }
 
   bool isAdminLogin({
-    required String mobileNumber,
+    required String mobile,
     required String password,
   }) {
-    return mobileNumber == adminMobile && password == adminPassword;
+    return mobile == adminMobile && password == adminPassword;
   }
 
   Future<void> loginAdmin() async {
     await _storage.saveRole(AuthRole.admin);
   }
 
-  /// Server admin login when available; otherwise local demo credentials.
   Future<void> loginAdminWithCredentials({
-    required String mobileNumber,
+    required String mobile,
     required String password,
   }) async {
-    final mobile = mobileNumber.trim();
+    final mob = mobile.trim();
     final pwd = password.trim();
     try {
-      final res = await _api.adminLogin(mobile: mobile, password: pwd);
+      final res = await _api.adminLogin(mobile: mob, password: pwd);
+      
+      // Fix logout bug
+      await _storage.clearSession();
+      
       await _storage.saveSession(token: res.token, userId: res.userId);
       final profile = userProfileFromApiUser(res.userJson);
       await _storage.saveUserAuth(
         UserAuthData(
-          mobileNumber: profile.mobileNumber.trim(),
+          mobile: profile.mobile.trim(),
           password: pwd,
           profile: profile,
         ),
       );
       await _storage.saveRole(AuthRole.admin);
-    } catch (_) {
-      if (!isAdminLogin(mobileNumber: mobile, password: pwd)) {
-        throw const AuthException('Invalid admin credentials.');
+    } catch (e) {
+      if (e is ApiException) {
+        throw AuthException(e.message);
       }
-      await _storage.clearSession();
-      await loginAdmin();
+      throw const AuthException('Invalid admin credentials.');
     }
+  }
+
+  Future<void> logout() async {
+    await _storage.clearSession();
   }
 }
 

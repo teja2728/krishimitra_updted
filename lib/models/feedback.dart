@@ -1,17 +1,17 @@
 class FeedbackEntry {
-  final String mobileNumber;
+  final String mobile;
   final String message;
   final DateTime createdAt;
 
   const FeedbackEntry({
-    required this.mobileNumber,
+    required this.mobile,
     required this.message,
     required this.createdAt,
   });
 
   factory FeedbackEntry.fromJson(Map<String, dynamic> json) {
     return FeedbackEntry(
-      mobileNumber: (json['mobileNumber'] ?? json['mobile'] ?? '').toString(),
+      mobile: (json['mobile'] ?? json['mobile'] ?? '').toString(),
       message: (json['message'] ?? '').toString(),
       createdAt: DateTime.tryParse(
             (json['createdAt'] ?? json['created_at'] ?? '').toString(),
@@ -21,7 +21,7 @@ class FeedbackEntry {
   }
 
   Map<String, dynamic> toJson() => {
-        'mobileNumber': mobileNumber,
+        'mobile': mobile,
         'message': message,
         'createdAt': createdAt.toIso8601String(),
       };

@@ -7,9 +7,9 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true },
     state: { type: String, default: '' },
     language: { type: String, default: '' },
-    cropTypes: [{ type: String }],
+    crops: [{ type: String }],
     soilType: { type: String, default: '' },
-    acres: { type: Number, default: 0 },
+    landSize: { type: Number, default: 0 },
     role: {
       type: String,
       enum: ['user', 'admin'],
