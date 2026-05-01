@@ -1,6 +1,7 @@
 const Scheme = require('../models/Scheme');
 const User   = require('../models/User');
-const { getSmartSchemes } = require('../services/groqSchemeService');
+const { getSmartSchemes }    = require('../services/groqSchemeService');
+const { translateSchemes }   = require('../services/translationService');
 
 // ─── Response mapper ──────────────────────────────────────────────────────────
 function schemeResponse(s) {
@@ -30,9 +31,12 @@ function schemeResponse(s) {
  * DB-first fetch:
  *   1. If fresh DB data exists  → return immediately
  *   2. Else → Groq → validate → store → return
+ * Supports ?lang=te|hi|kn for on-the-fly backend translation via Groq.
  */
 async function getSmartSchemesHandler(req, res) {
   try {
+    const lang = (req.query.lang || 'en').toLowerCase().trim();
+
     const user = await User.findById(req.user.sub).lean();
     if (!user) return res.status(404).json({ message: 'User not found' });
 
@@ -44,8 +48,17 @@ async function getSmartSchemesHandler(req, res) {
     };
 
     const { schemes, source } = await getSmartSchemes(profile);
-    console.log(`[Schemes] Returning ${schemes.length} schemes (source: ${source})`);
-    return res.json(schemes.map(schemeResponse));
+    console.log(`[Schemes] ${schemes.length} schemes (source: ${source}, lang: ${lang})`);
+
+    // Map to API shape first (plain objects with string id)
+    const mapped = schemes.map(schemeResponse);
+
+    // Translate if not English
+    const finalSchemes = lang !== 'en'
+      ? await translateSchemes(mapped, lang)
+      : mapped;
+
+    return res.json(finalSchemes);
 
   } catch (err) {
     console.error('[Schemes] Smart fetch error:', err.message);
@@ -56,8 +69,15 @@ async function getSmartSchemesHandler(req, res) {
 // ─── GET /api/schemes  (admin: list all) ─────────────────────────────────────
 async function listAll(req, res) {
   try {
+    const lang = (req.query.lang || 'en').toLowerCase().trim();
     const schemes = await Scheme.find().sort({ createdAt: -1 }).lean();
-    return res.json(schemes.map(schemeResponse));
+    const mapped  = schemes.map(schemeResponse);
+
+    const finalSchemes = lang !== 'en'
+      ? await translateSchemes(mapped, lang)
+      : mapped;
+
+    return res.json(finalSchemes);
   } catch (err) {
     console.error(err);
     return res.status(500).json({ message: 'Failed to load schemes' });

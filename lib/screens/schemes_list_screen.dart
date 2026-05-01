@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../l10n/app_strings.dart';
 import '../models/scheme.dart';
 import '../services/url_service.dart';
 import '../widgets/scheme_card.dart';
@@ -113,6 +114,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
     final profileAsync   = ref.watch(userProfileProvider);
     final bookmarksAsync = ref.watch(bookmarksProvider);
     final remindersAsync = ref.watch(remindersProvider);
+    final tr             = ref.watch(trProvider);
 
     final bookmarkedIds = bookmarksAsync.value ?? <String>{};
     final reminderIds   = remindersAsync.value ?? <String>{};
@@ -159,7 +161,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          'Browse government schemes for farmers',
+                          tr('browse_schemes'),
                           style: Theme.of(context).textTheme.bodySmall,
                         ),
                       ],
@@ -168,13 +170,13 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                   const SizedBox(width: 8),
                   _IconBtn(
                     icon: Icons.notifications_outlined,
-                    tooltip: 'Notifications',
+                    tooltip: tr('notifications'),
                     onTap: () => context.go('/notifications'),
                   ),
                   const SizedBox(width: 4),
                   _IconBtn(
                     icon: Icons.bookmark_outline_rounded,
-                    tooltip: 'Bookmarks',
+                    tooltip: tr('bookmarks'),
                     onTap: () => context.go('/bookmarks'),
                   ),
                 ],
@@ -224,7 +226,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                           size: 18, color: Colors.white),
                     const SizedBox(width: 10),
                     Text(
-                      _fetching ? 'Fetching Schemes…' : 'Fetch Schemes from Server',
+                      _fetching ? tr('fetching_schemes') : tr('fetch_schemes'),
                       style: TextStyle(
                         color: _fetching
                             ? AppTheme.primary
@@ -279,7 +281,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                                         .colorScheme
                                         .onSurfaceVariant),
                             const SizedBox(width: 6),
-                            Text('Filter & Sort',
+                            Text(tr('filter_sort'),
                                 style: Theme.of(context)
                                     .textTheme
                                     .labelMedium
@@ -348,7 +350,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                       Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: Text(
-                          '${filtered.length} scheme${filtered.length == 1 ? '' : 's'} found',
+                          '${filtered.length} ${filtered.length == 1 ? tr('scheme_count_single') : tr('scheme_count_plural')}',
                           style:
                               Theme.of(context).textTheme.bodySmall?.copyWith(
                                     color: Theme.of(context)
@@ -383,9 +385,8 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                                       final link = scheme.applyLink.trim();
                                       if (link.isEmpty) {
                                         ScaffoldMessenger.of(context)
-                                            .showSnackBar(const SnackBar(
-                                          content: Text(
-                                              'No apply link available.'),
+                                            .showSnackBar(SnackBar(
+                                          content: Text(tr('no_apply_link')),
                                         ));
                                         return;
                                       }
@@ -427,15 +428,15 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
 
 // ─── Filter Panel (Bottom Sheet) ──────────────────────────────────────────────
 
-class _FilterPanel extends StatefulWidget {
+class _FilterPanel extends ConsumerStatefulWidget {
   final _FilterState initial;
   const _FilterPanel({required this.initial});
 
   @override
-  State<_FilterPanel> createState() => _FilterPanelState();
+  ConsumerState<_FilterPanel> createState() => _FilterPanelState();
 }
 
-class _FilterPanelState extends State<_FilterPanel> {
+class _FilterPanelState extends ConsumerState<_FilterPanel> {
   late SchemeFilter _filter;
   late SchemeSort   _sort;
 
@@ -460,6 +461,7 @@ class _FilterPanelState extends State<_FilterPanel> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final cs    = theme.colorScheme;
+    final tr    = ref.watch(trProvider);
 
     final isDark = theme.brightness == Brightness.dark;
     return Container(
@@ -511,14 +513,14 @@ class _FilterPanelState extends State<_FilterPanel> {
                     size: 18, color: AppTheme.primary),
               ),
               const SizedBox(width: 10),
-              Text('Filter & Sort',
+              Text(tr('filter_sort'),
                   style: theme.textTheme.titleMedium
                       ?.copyWith(fontWeight: FontWeight.w700)),
               const Spacer(),
               TextButton(
                 onPressed: _clear,
-                child: Text('Clear All',
-                    style: TextStyle(
+                child: Text(tr('clear_all'),
+                    style: const TextStyle(
                         color: Colors.redAccent,
                         fontWeight: FontWeight.w600)),
               ),
@@ -538,7 +540,7 @@ class _FilterPanelState extends State<_FilterPanel> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-                  child: Text('CATEGORY',
+                  child: Text(tr('category'),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: cs.onSurfaceVariant,
                         letterSpacing: 1.2,
@@ -546,13 +548,13 @@ class _FilterPanelState extends State<_FilterPanel> {
                       )),
                 ),
                 _FilterCheckTile(
-                  label: 'All Schemes',
+                  label: tr('all_schemes'),
                   icon: Icons.all_inclusive_rounded,
                   checked: _filter == SchemeFilter.all,
                   onTap: () => setState(() => _filter = SchemeFilter.all),
                 ),
                 _FilterCheckTile(
-                  label: 'State Government Schemes',
+                  label: tr('state_govt_schemes'),
                   icon: Icons.location_city_outlined,
                   checked: _filter == SchemeFilter.state,
                   onTap: () => setState(() => _filter =
@@ -561,7 +563,7 @@ class _FilterPanelState extends State<_FilterPanel> {
                           : SchemeFilter.state),
                 ),
                 _FilterCheckTile(
-                  label: 'Central Government Schemes',
+                  label: tr('central_govt_schemes'),
                   icon: Icons.account_balance_outlined,
                   checked: _filter == SchemeFilter.central,
                   onTap: () => setState(() => _filter =
@@ -586,7 +588,7 @@ class _FilterPanelState extends State<_FilterPanel> {
               children: [
                 Padding(
                   padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
-                  child: Text('SORT BY NAME',
+                  child: Text(tr('sort_by_name'),
                       style: theme.textTheme.labelSmall?.copyWith(
                         color: cs.onSurfaceVariant,
                         letterSpacing: 1.2,
@@ -594,14 +596,14 @@ class _FilterPanelState extends State<_FilterPanel> {
                       )),
                 ),
                 _SortRadioTile(
-                  label: 'A → Z  (Ascending)',
+                  label: tr('sort_a_z'),
                   icon: Icons.arrow_upward_rounded,
                   value: SchemeSort.nameAsc,
                   groupValue: _sort,
                   onChanged: (v) => setState(() => _sort = v),
                 ),
                 _SortRadioTile(
-                  label: 'Z → A  (Descending)',
+                  label: tr('sort_z_a'),
                   icon: Icons.arrow_downward_rounded,
                   value: SchemeSort.nameDesc,
                   groupValue: _sort,
@@ -627,8 +629,8 @@ class _FilterPanelState extends State<_FilterPanel> {
                 ],
               ),
               alignment: Alignment.center,
-              child: const Text('Apply Filters',
-                  style: TextStyle(
+              child: Text(tr('apply_filters'),
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,

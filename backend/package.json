@@ -13,8 +13,11 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "franc-min": "^6.2.0",
     "groq-sdk": "^1.1.2",
     "jsonwebtoken": "^9.0.2",
-    "mongoose": "^8.9.3"
+    "mongoose": "^8.9.3",
+    "multer": "^2.1.1",
+    "pdfkit": "^0.18.0"
   }
 }

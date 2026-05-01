@@ -152,23 +152,29 @@ class ApiService {
     return AuthResponse(token: token, userId: userId, userJson: user);
   }
 
-  // Fetch schemes using the new /smart endpoint
-  Future<List<Scheme>> fetchSchemes() async {
+  // Fetch schemes using the /smart endpoint with optional language translation
+  Future<List<Scheme>> fetchSchemes({String lang = 'en'}) async {
+    // Map full language name → 2-letter code the backend expects
+    final langCode = _langCode(lang);
     try {
+      final uri = Uri.parse('$_base/schemes/smart')
+          .replace(queryParameters: langCode != 'en' ? {'lang': langCode} : null);
       final res = await _client.get(
-        _uri('/schemes/smart'),
+        uri,
         headers: await _headers(auth: true),
       );
       _throwIfError(res);
       var decoded = jsonDecode(res.body);
-      
+
       // Handle fallback response format { message: '...', data: [...] }
       if (decoded is Map<String, dynamic> && decoded.containsKey('data')) {
         decoded = decoded['data'];
       }
-      
-      // Save for offline
-      await _storage.saveOfflineSchemes(jsonEncode(decoded));
+
+      // Save for offline (always store English baseline for cache purposes)
+      if (langCode == 'en') {
+        await _storage.saveOfflineSchemes(jsonEncode(decoded));
+      }
 
       if (decoded is! List) {
         throw ApiException('Invalid schemes payload');
@@ -190,6 +196,16 @@ class ApiService {
         }
       }
       rethrow;
+    }
+  }
+
+  /// Maps full language name to a 2-letter backend code.
+  static String _langCode(String lang) {
+    switch (lang.toLowerCase()) {
+      case 'telugu':  return 'te';
+      case 'hindi':   return 'hi';
+      case 'kannada': return 'kn';
+      default:        return 'en';
     }
   }
 

@@ -15,6 +15,7 @@ import '../../services/local_user_storage.dart';
 import '../../services/reminder_service.dart';
 import '../../services/notification_service.dart';
 import '../../models/app_notification.dart';
+import '../providers/language_provider.dart';
 
 final localUserStorageProvider = Provider<LocalUserStorage>(
   (ref) => LocalUserStorage(),
@@ -32,11 +33,15 @@ final schemesRepositoryProvider = Provider<SchemesRepository>(
   ),
 );
 
-final schemesProvider = FutureProvider<List<Scheme>>(
-  (ref) => ref
+// schemesProvider re-runs whenever languageProvider changes.
+// The current language is forwarded to the backend as ?lang=te|hi|kn.
+final schemesProvider = FutureProvider<List<Scheme>>((ref) async {
+  final langAsync = ref.watch(languageProvider);
+  final lang      = langAsync.value ?? 'English';
+  return ref
       .watch(schemesRepositoryProvider)
-      .fetchSchemesWithAdminOverrides(),
-);
+      .fetchSchemesWithAdminOverrides(lang: lang);
+});
 
 final localAuthServiceProvider = Provider<LocalAuthService>(
   (ref) => LocalAuthService(

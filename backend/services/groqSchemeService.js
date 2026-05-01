@@ -40,8 +40,8 @@ function validateAndNormalize(raw) {
   const eligibility = Array.isArray(raw.eligibility)
     ? raw.eligibility.map(e => e.toString().trim()).filter(Boolean)
     : typeof raw.eligibility === 'string' && raw.eligibility.trim()
-    ? [raw.eligibility.trim()]
-    : [];
+      ? [raw.eligibility.trim()]
+      : [];
   const documents = Array.isArray(raw.documents)
     ? raw.documents.map(d => d.toString().trim()).filter(Boolean)
     : [];
@@ -102,7 +102,7 @@ Each object must have exactly these fields:
 ]`;
 
   const completion = await groq.chat.completions.create({
-    model: 'llama-3.1-8b-instant',
+    model: 'llama-3.1-8b-instant', // speed + cost for scheme list fetching
     messages: [
       { role: 'system', content: 'You are a JSON-only responder. Output only a valid JSON array, nothing else.' },
       { role: 'user', content: prompt },

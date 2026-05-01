@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../app/providers/language_provider.dart';
 import '../data/app_constants.dart';
+import '../l10n/app_strings.dart';
 import '../models/auth_role.dart';
 import '../models/user_profile.dart';
 import '../widgets/multi_select_chips.dart';
@@ -102,6 +104,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   Widget build(BuildContext context) {
     final profileAsync = ref.watch(userProfileProvider);
     final roleAsync    = ref.watch(authRoleProvider);
+    final tr           = ref.watch(trProvider);
     final isDark       = Theme.of(context).brightness == Brightness.dark;
     final tt           = Theme.of(context).textTheme;
 
@@ -224,7 +227,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
 
                 if (!_isEditing) ...[
                   // ── View mode: info cards ────────────────────────────
-                  Text('Profile Details',
+                  Text(tr('edit_profile'),
                       style: tt.titleSmall
                           ?.copyWith(fontWeight: FontWeight.w700)),
                   const SizedBox(height: 12),
@@ -234,7 +237,7 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Edit Profile',
+                      Text(tr('edit_profile'),
                           style: tt.titleSmall
                               ?.copyWith(fontWeight: FontWeight.w700)),
                       TextButton(
@@ -261,12 +264,16 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
                   ),
                   const SizedBox(height: 14),
                   _PremiumDropdown<String>(
-                    label: 'Language',
+                    label: tr('language'),
                     icon: Icons.translate_rounded,
                     value: _selectedLanguage,
                     items: kLanguages,
-                    onChanged: (v) =>
-                        setState(() => _selectedLanguage = v!),
+                    onChanged: (v) {
+                      if (v == null) return;
+                      setState(() => _selectedLanguage = v);
+                      // Instantly apply language across the whole app
+                      ref.read(languageProvider.notifier).setLanguage(v);
+                    },
                   ),
                   const SizedBox(height: 14),
                   _PremiumDropdown<String>(

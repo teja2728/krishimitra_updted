@@ -16,6 +16,7 @@ import '../screens/splash_screen.dart';
 import '../screens/state_schemes_screen.dart';
 import '../screens/registration_screen.dart';
 import '../screens/gemini_chat_screen.dart';
+import '../screens/crop_advisor_screen.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/splash',
@@ -75,6 +76,12 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/home/ai',
           builder: (context, state) => const GeminiChatScreen(),
+        ),
+
+        // AI Crop Advisor
+        GoRoute(
+          path: '/home/crop-advisor',
+          builder: (context, state) => const CropAdvisorScreen(),
         ),
 
         // Bookmarks & Notifications share the user shell (so they keep the nav)

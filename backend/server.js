@@ -24,6 +24,7 @@ app.use('/api/admin', require('./routes/adminRoutes'));
 app.use('/api/gemini', require('./routes/geminiRoutes'));
 app.use('/api/personalize', require('./routes/personalizationRoutes'));
 app.use('/api/translate', require('./routes/translateRoutes'));
+app.use('/api/farm',      require('./routes/farmRoutes'));
 
 // ─── Graceful port binding ───────────────────────────────────────────────────
 const BASE_PORT = Number(process.env.PORT) || 5000;

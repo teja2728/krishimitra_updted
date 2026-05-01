@@ -18,9 +18,9 @@ class SchemesRepository {
   final SchemesAdminStore _adminStore;
   final ApiService _api;
 
-  Future<List<Scheme>> fetchSchemes() async {
+  Future<List<Scheme>> fetchSchemes({String lang = 'en'}) async {
     try {
-      final remote = await _api.fetchSchemes();
+      final remote = await _api.fetchSchemes(lang: lang);
       if (remote.isEmpty) {
         return _localSource.loadSchemes();
       }
@@ -34,10 +34,13 @@ class SchemesRepository {
     return schemes.where((s) => s.type == type).toList(growable: false);
   }
 
-  Future<List<Scheme>> fetchSchemesWithAdminOverrides() async {
+  /// Returns admin-stored schemes if available (ignoring translation —
+  /// admin data is always English). Otherwise falls through to [fetchSchemes]
+  /// which will request the backend with the correct [lang].
+  Future<List<Scheme>> fetchSchemesWithAdminOverrides({String lang = 'en'}) async {
     final hasStored = await _adminStore.hasStoredSchemes();
     if (hasStored) return _adminStore.readStoredSchemes();
-    return fetchSchemes();
+    return fetchSchemes(lang: lang);
   }
 
   Future<void> saveAllSchemes(List<Scheme> schemes) {

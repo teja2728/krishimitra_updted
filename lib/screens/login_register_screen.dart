@@ -4,6 +4,9 @@ import 'package:go_router/go_router.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../app/providers/language_provider.dart';
+import '../l10n/app_strings.dart';
+import '../widgets/language_selector.dart';
 
 class LoginRegisterScreen extends ConsumerStatefulWidget {
   const LoginRegisterScreen({super.key});
@@ -154,10 +157,15 @@ class _LoginRegisterScreenState extends ConsumerState<LoginRegisterScreen>
                             fontWeight: FontWeight.w800,
                           )),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 12),
+                    // ── Language selector ────────────────────────────
+                    Center(child: const LanguageSelector()),
+                    const SizedBox(height: 24),
                     Center(
                       child: Text(
-                        'Sign in to continue to KrishiMitra',
+                        ref.watch(trProvider)('select_language') == 'select_language'
+                            ? 'Sign in to continue to KrishiMitra'
+                            : 'Sign in to continue to KrishiMitra',
                         style: tt.bodySmall,
                       ),
                     ),

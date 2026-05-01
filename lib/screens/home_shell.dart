@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../l10n/app_strings.dart';
 import '../models/auth_role.dart';
 import '../widgets/language_selector.dart';
 
@@ -63,6 +64,7 @@ class HomeShell extends ConsumerWidget {
     if (currentPath.contains('/home/feedback')) appBarTitle = 'Feedback';
     if (currentPath.contains('/home/account')) appBarTitle = 'Account';
     if (currentPath.contains('/home/ai')) appBarTitle = 'AI Chat';
+    if (currentPath.contains('/home/crop-advisor')) appBarTitle = 'Crop Advisor';
 
     return Scaffold(
       backgroundColor:
@@ -154,21 +156,24 @@ class HomeShell extends ConsumerWidget {
 }
 
 // ─── User bottom nav ──────────────────────────────────────────────────────────
-class _UserNav extends StatelessWidget {
+class _UserNav extends ConsumerWidget {
   final String currentPath;
   const _UserNav({required this.currentPath});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tr = ref.watch(trProvider); // rebuilds instantly on language switch
     final idx = currentPath.startsWith('/home/ai')
         ? 1
-        : currentPath.startsWith('/home/about')
+        : currentPath.startsWith('/home/crop-advisor')
             ? 2
-            : currentPath.startsWith('/home/feedback')
+            : currentPath.startsWith('/home/about')
                 ? 3
-                : currentPath.startsWith('/home/account')
+                : currentPath.startsWith('/home/feedback')
                     ? 4
-                    : 0;
+                    : currentPath.startsWith('/home/account')
+                        ? 5
+                        : 0;
 
     return BottomNavigationBar(
       currentIndex: idx,
@@ -178,41 +183,48 @@ class _UserNav extends StatelessWidget {
         switch (i) {
           case 0: context.go('/home/state'); break;
           case 1: context.go('/home/ai'); break;
-          case 2: context.go('/home/about'); break;
-          case 3: context.go('/home/feedback'); break;
-          case 4: context.go('/home/account'); break;
+          case 2: context.go('/home/crop-advisor'); break;
+          case 3: context.go('/home/about'); break;
+          case 4: context.go('/home/feedback'); break;
+          case 5: context.go('/home/account'); break;
         }
       },
-      items: const [
+      items: [
         BottomNavigationBarItem(
-          icon: Icon(Icons.home_outlined),
-          activeIcon: Icon(Icons.home_rounded),
-          label: 'Home',
+          icon: const Icon(Icons.home_outlined),
+          activeIcon: const Icon(Icons.home_rounded),
+          label: tr('nav_home'),
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.auto_awesome_outlined),
-          activeIcon: Icon(Icons.auto_awesome_rounded),
-          label: 'AI Chat',
+          icon: const Icon(Icons.auto_awesome_outlined),
+          activeIcon: const Icon(Icons.auto_awesome_rounded),
+          label: tr('nav_ai_chat'),
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.eco_outlined),
-          activeIcon: Icon(Icons.eco_rounded),
-          label: 'About',
+          icon: const Icon(Icons.agriculture_outlined),
+          activeIcon: const Icon(Icons.agriculture_rounded),
+          label: tr('nav_crop_ai'),
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.feedback_outlined),
-          activeIcon: Icon(Icons.feedback_rounded),
-          label: 'Feedback',
+          icon: const Icon(Icons.eco_outlined),
+          activeIcon: const Icon(Icons.eco_rounded),
+          label: tr('nav_about'),
         ),
         BottomNavigationBarItem(
-          icon: Icon(Icons.person_outline_rounded),
-          activeIcon: Icon(Icons.person_rounded),
-          label: 'Account',
+          icon: const Icon(Icons.feedback_outlined),
+          activeIcon: const Icon(Icons.feedback_rounded),
+          label: tr('nav_feedback'),
+        ),
+        BottomNavigationBarItem(
+          icon: const Icon(Icons.person_outline_rounded),
+          activeIcon: const Icon(Icons.person_rounded),
+          label: tr('nav_account'),
         ),
       ],
     );
   }
 }
+
 
 // ─── Admin bottom nav ─────────────────────────────────────────────────────────
 class _AdminNav extends StatelessWidget {

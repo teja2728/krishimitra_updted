@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/app_theme.dart';
+import '../l10n/app_strings.dart';
 import '../models/scheme.dart';
 import '../models/user_profile.dart';
 import '../services/personalization_service.dart';
@@ -109,6 +110,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
     final cs     = Theme.of(context).colorScheme;
     final tt     = Theme.of(context).textTheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tr     = ref.watch(trProvider);
     final days   = _daysUntilDeadline(widget.scheme.deadline);
     final isUrgent  = days != null && days <= 3 && days >= 0;
     final isExpired = days != null && days < 0;
@@ -166,8 +168,8 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                       const SizedBox(width: 6),
                       Text(
                         days == 0
-                            ? '⚠️ Deadline TODAY!'
-                            : '⚠️ Deadline in $days day${days == 1 ? '' : 's'}!',
+                            ? tr('deadline_today')
+                            : '${tr('deadline_days')} $days ${tr('days')}!',
                         style: tt.labelSmall?.copyWith(
                           color: Colors.orangeAccent,
                           fontWeight: FontWeight.w700,
@@ -187,7 +189,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                       const Icon(Icons.block_rounded, size: 14, color: Colors.redAccent),
                       const SizedBox(width: 6),
                       Text(
-                        'Deadline passed',
+                        tr('deadline_passed'),
                         style: tt.labelSmall?.copyWith(
                           color: Colors.redAccent,
                           fontWeight: FontWeight.w700,
@@ -234,7 +236,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                               ? AppTheme.accent
                               : cs.onSurfaceVariant,
                           onTap: widget.onToggleBookmark,
-                          tooltip: widget.isBookmarked ? 'Remove bookmark' : 'Bookmark',
+                          tooltip: widget.isBookmarked ? tr('remove_bookmark') : tr('bookmark'),
                         ),
                       ],
                     ),
@@ -304,7 +306,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                             ),
                             const SizedBox(width: 8),
                             Text(
-                              'Analyzing for your profile…',
+                              tr('analyzing_profile'),
                               style: tt.labelSmall?.copyWith(
                                   color: cs.onSurfaceVariant),
                             ),
@@ -386,7 +388,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                                   size: 15, color: AppTheme.primary),
                               const SizedBox(width: 8),
                               Text(
-                                'How to Apply',
+                                tr('how_to_apply'),
                                 style: tt.labelMedium?.copyWith(
                                   color: AppTheme.primary,
                                   fontWeight: FontWeight.w700,
@@ -455,7 +457,7 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                       children: [
                         Expanded(
                           child: _GradientButton(
-                            label: 'Apply Now',
+                            label: tr('apply_now'),
                             icon: Icons.open_in_new_rounded,
                             onTap: widget.onApply,
                             typeColor: _typeColor,
@@ -471,8 +473,8 @@ class _SchemeCardState extends ConsumerState<SchemeCard>
                               : cs.onSurfaceVariant,
                           onTap: widget.onToggleReminder,
                           tooltip: widget.isReminded
-                              ? 'Remove reminder'
-                              : 'Set reminder',
+                              ? tr('remove_reminder')
+                              : tr('set_reminder'),
                         ),
                       ],
                     ),

@@ -1,10 +1,15 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../app/providers/language_provider.dart';
 import '../services/gemini_chat_service.dart';
 
 // ─── Message model ────────────────────────────────────────────────────────────
@@ -12,12 +17,14 @@ import '../services/gemini_chat_service.dart';
 enum _Role { user, ai }
 
 class _Message {
-  _Message({required this.role, required this.text, DateTime? ts})
+  _Message({required this.role, required this.text, DateTime? ts, this.langTag})
       : timestamp = ts ?? DateTime.now();
 
-  final _Role   role;
-  final String  text;
+  final _Role    role;
+  final String   text;
   final DateTime timestamp;
+  /// Optional tag shown below voice transcripts, e.g. '🎤 Telugu'
+  final String?  langTag;
 }
 
 // ─── Quick-prompt chips shown when chat is empty ──────────────────────────────
@@ -48,8 +55,11 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
   final _focusNode  = FocusNode();
 
   late GeminiChatService _service;
-  bool   _loading   = false;
-  String _errorText = '';
+  bool   _loading        = false;
+  bool   _isRecording    = false;
+  bool   _voiceProcessing = false;
+  String _errorText      = '';
+  final _recorder = AudioRecorder();
 
   // Typing-dots animation
   late final AnimationController _dotAnim;
@@ -77,7 +87,94 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
     _scrollCtrl.dispose();
     _focusNode.dispose();
     _service.dispose();
+    _recorder.dispose();
     super.dispose();
+  }
+
+  // ── Voice recording ───────────────────────────────────────────────────────
+  Future<void> _toggleRecording() async {
+    if (_loading || _voiceProcessing) return;
+
+    if (_isRecording) {
+      await _stopAndSendVoice();
+    } else {
+      await _startRecording();
+    }
+  }
+
+  Future<void> _startRecording() async {
+    final status = await Permission.microphone.request();
+    if (!status.isGranted) {
+      setState(() => _errorText = 'Microphone permission denied.');
+      return;
+    }
+    final dir  = await getTemporaryDirectory();
+    final path = '${dir.path}/krishi_voice_${DateTime.now().millisecondsSinceEpoch}.m4a';
+
+    await _recorder.start(
+      const RecordConfig(encoder: AudioEncoder.aacLc, bitRate: 64000, sampleRate: 16000),
+      path: path,
+    );
+    if (!mounted) return;
+    setState(() {
+      _isRecording   = true;
+      _errorText     = '';
+    });
+  }
+
+  Future<void> _stopAndSendVoice() async {
+    final path = await _recorder.stop();
+    if (!mounted) return;
+    setState(() => _isRecording = false);
+
+    if (path == null || path.isEmpty) {
+      setState(() => _errorText = 'Recording failed — no audio captured.');
+      return;
+    }
+
+    final file = File(path);
+    if (!file.existsSync() || file.lengthSync() < 1000) {
+      setState(() => _errorText = 'Recording too short. Please try again.');
+      return;
+    }
+
+    setState(() {
+      _voiceProcessing = true;
+      _loading         = true;
+      _errorText       = '';
+    });
+
+    try {
+      // Read current app language to send as hint
+      final lang = ref.read(languageProvider).value ?? 'English';
+      final result = await _service.sendVoice(file, languageHint: lang);
+
+      if (!mounted) return;
+      setState(() {
+        // Show transcribed text as user bubble
+        if (result.inputText.isNotEmpty) {
+          _messages.add(_Message(
+            role: _Role.user,
+            text: result.inputText,
+            langTag: '🎤 ${result.detectedLanguage}',
+          ));
+        }
+        _messages.add(_Message(role: _Role.ai, text: result.reply));
+        _voiceProcessing = false;
+        _loading         = false;
+      });
+      _scrollToBottom();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _voiceProcessing = false;
+        _loading         = false;
+        _errorText       = e.toString().replaceFirst('Exception: ', '');
+      });
+    } finally {
+      // Clean up temp file
+      try { File(path).deleteSync(); } catch (_) {}
+    }
   }
 
   // ── Scroll to bottom ─────────────────────────────────────────────────────
@@ -99,6 +196,7 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
     if (text.isEmpty || _loading) return;
 
     _controller.clear();
+    final lang = ref.read(languageProvider).value ?? 'English';
     setState(() {
       _messages.add(_Message(role: _Role.user, text: text));
       _loading   = true;
@@ -107,10 +205,10 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
     _scrollToBottom();
 
     try {
-      final reply = await _service.sendMessage(text);
+      final result = await _service.sendMessage(text, language: lang);
       if (!mounted) return;
       setState(() {
-        _messages.add(_Message(role: _Role.ai, text: reply));
+        _messages.add(_Message(role: _Role.ai, text: result.reply));
         _loading = false;
       });
     } catch (e) {
@@ -392,17 +490,33 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
                           ),
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      _formatTime(msg.timestamp),
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: isUser
-                            ? Colors.white.withOpacity(0.55)
-                            : Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant
-                                .withOpacity(0.6),
-                      ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatTime(msg.timestamp),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: isUser
+                                ? Colors.white.withOpacity(0.55)
+                                : Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant
+                                    .withOpacity(0.6),
+                          ),
+                        ),
+                        if (msg.langTag != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            msg.langTag!,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.white.withOpacity(0.70),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
                 ),
@@ -545,62 +659,77 @@ class _GeminiChatScreenState extends ConsumerState<GeminiChatScreen>
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Expanded(
-            child: Container(
-              constraints: const BoxConstraints(maxHeight: 130),
-              decoration: BoxDecoration(
-                color: isDark
-                    ? const Color(0xFF1E2535)
-                    : const Color(0xFFF3F6F4),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.10)
-                      : Colors.black.withOpacity(0.08),
-                ),
-              ),
-              child: TextField(
-                controller: _controller,
-                focusNode: _focusNode,
-                minLines: 1,
-                maxLines: 5,
-                textCapitalization: TextCapitalization.sentences,
-                style: Theme.of(context)
-                    .textTheme
-                    .bodyMedium
-                    ?.copyWith(fontSize: 14),
-                decoration: InputDecoration(
-                  hintText: 'Ask about crops, schemes, soil…',
-                  hintStyle: TextStyle(
-                    color: isDark
-                        ? Colors.white.withOpacity(0.30)
-                        : Colors.black38,
-                    fontSize: 13.5,
-                  ),
-                  border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 12),
-                ),
-                onSubmitted: _loading ? null : _send,
-              ),
-            ),
+            child: _isRecording
+                // ── Listening indicator replaces text field ──────────────
+                ? _ListeningIndicator(isDark: isDark)
+                : _voiceProcessing
+                    // ── Processing indicator ─────────────────────────────
+                    ? _ProcessingIndicator(isDark: isDark)
+                    // ── Normal text field ────────────────────────────────
+                    : Container(
+                        constraints: const BoxConstraints(maxHeight: 130),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? const Color(0xFF1E2535)
+                              : const Color(0xFFF3F6F4),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: isDark
+                                ? Colors.white.withOpacity(0.10)
+                                : Colors.black.withOpacity(0.08),
+                          ),
+                        ),
+                        child: TextField(
+                          controller: _controller,
+                          focusNode: _focusNode,
+                          minLines: 1,
+                          maxLines: 5,
+                          textCapitalization: TextCapitalization.sentences,
+                          style: Theme.of(context)
+                              .textTheme
+                              .bodyMedium
+                              ?.copyWith(fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Ask about crops, schemes, soil…',
+                            hintStyle: TextStyle(
+                              color: isDark
+                                  ? Colors.white.withOpacity(0.30)
+                                  : Colors.black38,
+                              fontSize: 13.5,
+                            ),
+                            border: InputBorder.none,
+                            contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14, vertical: 12),
+                          ),
+                          onSubmitted: _loading ? null : _send,
+                        ),
+                      ),
           ),
           const SizedBox(width: 8),
+          // Mic button
+          _MicButton(
+            isRecording:    _isRecording,
+            isProcessing:   _voiceProcessing,
+            isDark:         isDark,
+            onTap:          _toggleRecording,
+          ),
+          const SizedBox(width: 6),
           // Send button
           GestureDetector(
-            onTap: _loading ? null : () => _send(_controller.text),
+            onTap: (_loading || _isRecording) ? null : () => _send(_controller.text),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               width: 48,
               height: 48,
               decoration: BoxDecoration(
-                gradient: _loading ? null : AppTheme.primaryGradient,
-                color: _loading
+                gradient: (_loading || _isRecording) ? null : AppTheme.primaryGradient,
+                color: (_loading || _isRecording)
                     ? (isDark
                         ? Colors.white.withOpacity(0.07)
                         : Colors.black.withOpacity(0.05))
                     : null,
                 borderRadius: BorderRadius.circular(14),
-                boxShadow: _loading
+                boxShadow: (_loading || _isRecording)
                     ? null
                     : [
                         BoxShadow(
@@ -672,6 +801,162 @@ class _QuickChip extends StatelessWidget {
                 fontSize: 12.5,
               ),
         ),
+      ),
+    );
+  }
+}
+
+// ─── Mic Button ───────────────────────────────────────────────────────────────
+
+class _MicButton extends StatelessWidget {
+  const _MicButton({
+    required this.isRecording,
+    required this.isProcessing,
+    required this.isDark,
+    required this.onTap,
+  });
+
+  final bool         isRecording;
+  final bool         isProcessing;
+  final bool         isDark;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color bg = isRecording
+        ? Colors.redAccent
+        : isDark
+            ? Colors.white.withOpacity(0.10)
+            : Colors.black.withOpacity(0.06);
+
+    final Widget icon = isProcessing
+        ? const SizedBox(
+            width: 20, height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          )
+        : Icon(
+            isRecording ? Icons.stop_rounded : Icons.mic_rounded,
+            color: isRecording
+                ? Colors.white
+                : (isDark ? Colors.white70 : Colors.black54),
+            size: 22,
+          );
+
+    return GestureDetector(
+      onTap: isProcessing ? null : onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: isRecording
+              ? [BoxShadow(
+                  color: Colors.redAccent.withOpacity(0.45),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                )]
+              : null,
+        ),
+        child: Center(child: icon),
+      ),
+    );
+  }
+}
+
+// ─── Listening indicator ──────────────────────────────────────────────────────
+
+class _ListeningIndicator extends StatefulWidget {
+  const _ListeningIndicator({required this.isDark});
+  final bool isDark;
+  @override
+  State<_ListeningIndicator> createState() => _ListeningIndicatorState();
+}
+
+class _ListeningIndicatorState extends State<_ListeningIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _pulse;
+  @override
+  void initState() {
+    super.initState();
+    _pulse = AnimationController(vsync: this, duration: const Duration(milliseconds: 700))
+      ..repeat(reverse: true);
+  }
+  @override
+  void dispose() { _pulse.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: Colors.redAccent.withOpacity(widget.isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.redAccent.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          AnimatedBuilder(
+            animation: _pulse,
+            builder: (_, __) => Container(
+              width: 10, height: 10,
+              decoration: BoxDecoration(
+                color: Colors.redAccent.withOpacity(0.4 + 0.6 * _pulse.value),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Listening… Tap ■ to stop',
+            style: TextStyle(
+              color: Colors.redAccent,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Processing indicator ─────────────────────────────────────────────────────
+
+class _ProcessingIndicator extends StatelessWidget {
+  const _ProcessingIndicator({required this.isDark});
+  final bool isDark;
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 52,
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: AppTheme.primary.withOpacity(isDark ? 0.14 : 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: AppTheme.primary.withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 16, height: 16,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              valueColor: AlwaysStoppedAnimation<Color>(AppTheme.primary),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Text(
+            'Processing voice…',
+            style: TextStyle(
+              color: AppTheme.primary,
+              fontSize: 13.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
       ),
     );
   }

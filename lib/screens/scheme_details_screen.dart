@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
+import '../l10n/app_strings.dart';
 import '../models/scheme.dart';
 import '../services/url_service.dart';
 
@@ -45,6 +46,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
     final schemesAsync   = ref.watch(schemesProvider);
     final bookmarksAsync = ref.watch(bookmarksProvider);
     final remindersAsync = ref.watch(remindersProvider);
+    final tr             = ref.watch(trProvider);
     final bookmarkedIds  = bookmarksAsync.value ?? <String>{};
     final reminderIds    = remindersAsync.value ?? <String>{};
     final isDark         = Theme.of(context).brightness == Brightness.dark;
@@ -154,7 +156,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             _TypeBadge(
-                                label: isCentral ? 'Central' : 'State',
+                                label: isCentral ? tr('central') : tr('state'),
                                 color: typeColor),
                             const SizedBox(height: 10),
                             Text(
@@ -201,7 +203,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
 
                       // Description card
                       _SectionCard(
-                        title: 'Overview',
+                        title: tr('overview'),
                         icon: Icons.info_outline_rounded,
                         typeColor: typeColor,
                         child: Text(scheme.description,
@@ -212,7 +214,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                       // Benefits
                       if (scheme.benefits.isNotEmpty) ...[
                         _SectionCard(
-                          title: 'Benefits',
+                          title: tr('benefits'),
                           icon: Icons.star_outline_rounded,
                           typeColor: typeColor,
                           child: Column(
@@ -228,7 +230,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                       // Eligibility
                       if (scheme.eligibility.isNotEmpty) ...[
                         _SectionCard(
-                          title: 'Eligibility',
+                          title: tr('eligibility'),
                           icon: Icons.verified_user_outlined,
                           typeColor: typeColor,
                           child: Column(
@@ -244,7 +246,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                       // Documents
                       if (scheme.documents.isNotEmpty) ...[
                         _SectionCard(
-                          title: 'Required Documents',
+                          title: tr('documents'),
                           icon: Icons.description_outlined,
                           typeColor: typeColor,
                           child: Column(
@@ -272,7 +274,7 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                               Icon(Icons.schedule_rounded,
                                   color: AppTheme.accent, size: 20),
                               const SizedBox(width: 10),
-                              Text('Last Date: ${scheme.deadline}',
+                              Text('${tr('last_date')}: ${scheme.deadline}',
                                   style: tt.labelMedium?.copyWith(
                                     color: AppTheme.accent,
                                     fontWeight: FontWeight.w600,
@@ -339,15 +341,15 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
                       ),
                     ],
                   ),
-                  child: const Row(
+                  child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.open_in_new_rounded,
+                      const Icon(Icons.open_in_new_rounded,
                           color: Colors.white, size: 18),
-                      SizedBox(width: 8),
+                      const SizedBox(width: 8),
                       Text(
-                        'Apply Now',
-                        style: TextStyle(
+                        tr('apply_now'),
+                        style: const TextStyle(
                           color: Colors.white,
                           fontSize: 16,
                           fontWeight: FontWeight.w700,
