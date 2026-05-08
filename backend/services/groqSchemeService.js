@@ -154,13 +154,27 @@ async function getSmartSchemes(profile) {
     ],
   }).lean();
 
-  // 2. Freshness check — use DB data if >= 3 schemes and all fresh
+  // 2. Freshness check — use DB data only if we have BOTH:
+  //    a) enough overall fresh schemes AND
+  //    b) at least one scheme specifically matching the user's state
+  //    (so a pure "central only" cache doesn't mask missing state schemes)
+  const MIN_FRESH = 3;
+  const MIN_STATE_SPECIFIC = 1;
+
   const freshnessCutoff = new Date(Date.now() - FRESHNESS_DAYS * 24 * 60 * 60 * 1000);
   const freshSchemes = dbSchemes.filter(
     s => !s.fetchedAt || new Date(s.fetchedAt) > freshnessCutoff
   );
 
-  if (freshSchemes.length >= 3) {
+  const hasEnoughFresh = freshSchemes.length >= MIN_FRESH;
+  const hasStateSpecific = state
+    ? freshSchemes.some(
+        s => s.type === 'state' &&
+             s.state && s.state.toLowerCase() === state.toLowerCase()
+      )
+    : true; // no state preference → central-only is fine
+
+  if (hasEnoughFresh && hasStateSpecific) {
     console.log(`[GroqSchemes] DB hit: ${freshSchemes.length} fresh schemes for ${state}`);
     return { schemes: sortByState(freshSchemes, state), source: 'db' };
   }

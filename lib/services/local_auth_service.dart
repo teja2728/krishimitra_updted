@@ -127,7 +127,10 @@ class LocalAuthService {
   }
 
   Future<void> logout() async {
-    await _storage.clearSession();
+    // Clear auth session ONLY (JWT, userId, role, profile).
+    // Bookmark and reminder caches are intentionally preserved so they
+    // survive as a local fallback until the next backend sync on re-login.
+    await _storage.clearAuthOnly();
   }
 }
 

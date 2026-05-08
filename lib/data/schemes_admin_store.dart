@@ -33,5 +33,16 @@ class SchemesAdminStore {
       jsonEncode(schemes.map((e) => e.toJson()).toList(growable: false)),
     );
   }
+
+  /// Clears the locally cached admin schemes.
+  ///
+  /// Call this whenever the user's state changes so the next
+  /// [SchemesRepository.fetchSchemesWithAdminOverrides] call will bypass
+  /// the stale cache and fetch fresh state-specific data from the backend.
+  Future<void> clear() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);
+  }
 }
+
 

@@ -246,7 +246,7 @@ class AdminManageSchemesScreen extends ConsumerWidget {
                                             ],
                                             const Spacer(),
                                             GestureDetector(
-                                              onTap: () => context.go(
+                                              onTap: () => context.push(
                                                 '/scheme/${Uri.encodeComponent(scheme.id)}',
                                               ),
                                               child: Text('View →',

@@ -2,39 +2,145 @@
 /**
  * geminiChatController.js
  *
- * Two endpoints:
+ * Endpoint:
  *
  *   POST /api/gemini/chat
  *     Body (JSON): { message: string, language?: string, context?: string }
  *     Returns:     { reply: string, detectedLanguage: string }
  *
- *   POST /api/gemini/voice
- *     Body (multipart): audio file  +  optional language field
- *     Returns:          { reply: string, inputText: string, detectedLanguage: string }
- *
- * Both endpoints share ONE Groq call path — no logic duplication.
+ * Domain restriction: Only agriculture-related queries are forwarded to Groq.
+ * Off-topic queries are rejected with a friendly message — no LLM call is made.
  */
 
 const Groq = require('groq-sdk');
-const { speechToText }   = require('../services/cambService');
-const { detectLanguage, fromCambLanguage } = require('../services/languageService');
+const { detectLanguage } = require('../services/languageService');
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const CHAT_MODEL    = 'llama-3.1-8b-instant';   // speed + cost for chat
-const MAX_TOKENS    = 1024;
-const MAX_AUDIO_MB  = parseInt(process.env.MAX_AUDIO_DURATION ?? '30', 10);
+const CHAT_MODEL  = 'llama-3.1-8b-instant';   // speed + cost for chat
+const MAX_TOKENS  = 1024;
+
+// ─── Agriculture keyword bank (EN + TE + HI + KN) ────────────────────────────
+const AGRI_KEYWORDS = [
+  // English
+  'farm','farmer','farming','agriculture','agri','crop','crops','cultivation',
+  'cultivate','harvest','harvesting','field','plantation','soil','land','acre',
+  'hectare','compost','manure','fertilizer','fertiliser','urea','npk','organic',
+  'mulch','tilling','ploughing','irrigation','drip','sprinkler','canal',
+  'rainwater','borewell','drainage','seed','seeds','seedling','paddy','rice',
+  'wheat','maize','corn','sugarcane','cotton','soybean','groundnut','peanut',
+  'pulses','lentils','chickpea','mustard','sunflower','barley','millet',
+  'jowar','bajra','ragi','turmeric','ginger','chilli','pepper','tomato',
+  'onion','potato','vegetables','fruits','mango','banana','papaya','coconut',
+  'rubber','jute','hemp','tea','coffee','spice','pest','pesticide','insecticide',
+  'herbicide','fungicide','weed','disease','blight','aphid','locust','spray',
+  'livestock','cattle','cow','buffalo','goat','sheep','pig','poultry','chicken',
+  'dairy','milk','egg','breed','veterinary','vet','animal husbandry','fish',
+  'fishery','aquaculture','beekeeping','honey','tractor','thresher','harvester',
+  'storage','silo','warehouse','scheme','yojana','subsidy','loan','credit',
+  'kcc','kisan','pm-kisan','pm kisan','pmfby','fasal bima','mgnrega','msp',
+  'minimum support price','e-nam','apmc','mandi','market','price','procurement',
+  'weather','monsoon','rain','drought','flood','climate','temperature','humidity',
+  'forecast','season','rabi','kharif','zaid','crop rotation','intercropping',
+  'greenhouse','polyhouse','hydroponic','vertical farming','precision agriculture',
+  'natural farming','sustainable','zero budget','yield','produce','fpo',
+  'cooperative','agro','kृषि','खेती',
+  // Telugu
+  'రైతు','వ్యవసాయం','పంట','విత్తనాలు','నేల','ఎరువు','నీటిపారుదల',
+  'పురుగుమందు','కంది','వరి','గోధుమ','మొక్కజొన్న','వేరుశనగ','మిర్చి',
+  'టమాటో','ఉల్లిపాయ','అరటి','పశుపాలన','పాడి','యోజన','సబ్సిడీ','రుణం',
+  'వర్షం','కరువు','వాతావరణం','ధర','మండి','కిసాన్','ఫసల్ బీమా',
+  // Hindi
+  'किसान','खेती','फसल','बीज','मिट्टी','खाद','सिंचाई','कीटनाशक','गेहूं',
+  'चावल','मक्का','दलहन','सरसों','कपास','गन्ना','आलू','टमाटर','प्याज',
+  'पशुपालन','गाय','भैंस','मुर्गीपालन','डेयरी','योजना','सब्सिडी','ऋण',
+  'बारिश','सूखा','मौसम','मंडी','भाव','पीएम किसान','फसल बीमा','जैविक',
+  'उर्वरक','रबी','खरीफ','कृषि',
+  // Kannada
+  'ರೈತ','ಕೃಷಿ','ಬೆಳೆ','ಬೀಜ','ಮಣ್ಣು','ಗೊಬ್ಬರ','ನೀರಾವರಿ','ಕೀಟನಾಶಕ',
+  'ಭತ್ತ','ಗೋಧಿ','ಜೋಳ','ರಾಗಿ','ತೊಗರಿ','ಕಡಲೆ','ಮೆಣಸಿನಕಾಯಿ','ಟೊಮ್ಯಾಟೊ',
+  'ಈರುಳ್ಳಿ','ಪಶುಪಾಲನೆ','ಹಾಲು','ಯೋಜನೆ','ಸಹಾಯಧನ','ಸಾಲ','ಮಳೆ','ಬರ',
+  'ಹವಾಮಾನ','ಮಂಡಿ','ಕಿಸಾನ್','ಸಾವಯವ',
+];
+
+// Obvious off-topic signals — if any of these appear AND no agri keyword found → block
+const OFF_TOPIC_SIGNALS = [
+  'java','python','javascript','typescript','kotlin','swift','rust','golang',
+  'c++','c#','ruby','php','react','angular','vue','nodejs','node.js','express',
+  'programming','coding','code','algorithm','data structure','fibonacci',
+  'factorial','sorting','linked list','binary tree','blockchain','nft',
+  'cryptocurrency','bitcoin','ethereum','movie','film','netflix','cricket',
+  'ipl','football','gaming','game','pubg','fortnite','valorant','playstation',
+  'xbox','politics','election','bollywood','celebrity','hack','hacking',
+  'malware','relationship','girlfriend','boyfriend','love story','homework',
+  'html','css','sql',
+];
+
+// Greeting/meta patterns — allow these to pass through
+const GREETING_PATTERNS = [
+  'hello','hi ','namaste','help','who are you','what can you do','your name',
+  'about you','krishimitra',
+];
+
+/**
+ * Returns true if the message appears agriculture-related.
+ * @param {string} message
+ */
+function isAgricultureQuery(message) {
+  const norm = message.toLowerCase().trim();
+
+  // 1. Check agri keywords
+  const hasAgri = AGRI_KEYWORDS.some(kw => norm.includes(kw));
+  if (hasAgri) return true;
+
+  // 2. Check off-topic signals
+  const hasOffTopic = OFF_TOPIC_SIGNALS.some(sig => norm.includes(sig));
+  if (hasOffTopic) return false;
+
+  // 3. Greetings / meta — pass through
+  const isGreeting = GREETING_PATTERNS.some(g => norm.startsWith(g) || norm.includes(g));
+  if (isGreeting) return true;
+
+  // 4. Short ambiguous query — let AI handle it
+  if (norm.split(' ').length <= 4) return true;
+
+  // 5. Default block for longer unrecognised queries
+  return false;
+}
+
+/**
+ * Return friendly block message in the correct language.
+ * @param {string} langName
+ */
+function getBlockMessage(langName) {
+  switch ((langName || '').toLowerCase()) {
+    case 'telugu':
+      return '🌾 నేను KrishiMitra AI అసిస్టెంట్‌ని. నేను వ్యవసాయం, పంటలు, రైతు పథకాలు మరియు వ్యవసాయ విషయాల గురించి మాత్రమే సహాయం చేయగలను.\n\nమీరు ఇవి అడగవచ్చు:\n• పంటలు & విత్తనాలు\n• ఎరువులు & నీటిపారుదల\n• ప్రభుత్వ పథకాలు\n• వ్యాధి నివారణ\n• వాతావరణం & మండి ధరలు';
+    case 'hindi':
+      return '🌾 मैं KrishiMitra AI असिस्टेंट हूँ। मैं केवल कृषि, फसल, किसान योजनाओं और खेती से जुड़े विषयों पर सहायता कर सकता हूँ।\n\nआप पूछ सकते हैं:\n• फसलें और बीज\n• उर्वरक और सिंचाई\n• सरकारी योजनाएं\n• रोग नियंत्रण\n• मौसम और मंडी भाव';
+    case 'kannada':
+      return '🌾 ನಾನು KrishiMitra AI ಸಹಾಯಕ. ನಾನು ಕೃಷಿ, ಬೆಳೆ, ರೈತ ಯೋಜನೆಗಳು ಮತ್ತು ಕೃಷಿ ವಿಷಯಗಳ ಬಗ್ಗೆ ಮಾತ್ರ ಸಹಾಯ ಮಾಡಬಲ್ಲೆ.\n\nನೀವು ಕೇಳಬಹುದು:\n• ಬೆಳೆ ಮತ್ತು ಬೀಜ\n• ಗೊಬ್ಬರ ಮತ್ತು ನೀರಾವರಿ\n• ಸರ್ಕಾರಿ ಯೋಜನೆಗಳು\n• ರೋಗ ನಿಯಂತ್ರಣ\n• ಹವಾಮಾನ ಮತ್ತು ಮಂಡಿ ಬೆಲೆ';
+    default:
+      return '🌾 I am KrishiMitra AI, your agriculture assistant.\nI only answer questions about farming, crops, and farmer welfare.\n\nYou can ask me about:\n• Crops & Seeds\n• Fertilizers & Irrigation\n• Government Schemes\n• Pest & Disease Control\n• Weather & Market Prices\n• Soil Health & Organic Farming';
+  }
+}
 
 // ─── Groq call (with single retry) ───────────────────────────────────────────
 async function callGroq(userText, langName, context) {
   const systemPrompt =
-    `You are KrishiMitra AI, a helpful assistant specialized in Indian agriculture, ` +
-    `farming schemes, crop advice, soil health, irrigation, and government subsidies for farmers. ` +
-    `IMPORTANT: Always respond ONLY in ${langName}. ` +
-    `Use simple, farmer-friendly language. Avoid complex jargon. ` +
-    `If asked something outside agriculture, politely redirect to farming topics in ${langName}.` +
-    (context ? ` Additional context: ${context}` : '');
+    `You are KrishiMitra AI, an expert assistant exclusively for Indian farmers. ` +
+    `STRICT RULES:\n` +
+    `1. You ONLY answer questions about agriculture, farming, crops, soil, ` +
+    `   irrigation, fertilizers, pesticides, livestock, government schemes for ` +
+    `   farmers, weather for farming, market prices (mandi), and related topics.\n` +
+    `2. If asked about coding, programming, entertainment, sports, politics, ` +
+    `   mathematics, or any non-agriculture topic, politely decline and suggest ` +
+    `   the user ask a farming-related question.\n` +
+    `3. ALWAYS respond ONLY in ${langName}.\n` +
+    `4. Use simple, farmer-friendly language. Avoid technical jargon.\n` +
+    `5. Be helpful, accurate, and encouraging to farmers.` +
+    (context ? `\nAdditional context: ${context}` : '');
 
   const attempt = async () =>
     groq.chat.completions.create({
@@ -60,7 +166,7 @@ async function callGroq(userText, langName, context) {
   return reply;
 }
 
-// ─── POST /api/gemini/chat  (text input) ─────────────────────────────────────
+// ─── POST /api/gemini/chat ────────────────────────────────────────────────────
 exports.chat = async (req, res) => {
   const { message, language, context } = req.body;
 
@@ -68,96 +174,41 @@ exports.chat = async (req, res) => {
     return res.status(400).json({ error: 'message field is required.' });
   }
 
-  try {
-    // Language: caller may declare it (from app's languageProvider), else auto-detect
-    let langInfo;
-    if (language && language.trim()) {
-      langInfo = { code2: _toLangCode(language), name: _toDisplayName(language) };
-    } else {
-      langInfo = await detectLanguage(message);
+  // Resolve language
+  let langName = 'English';
+  if (language && language.trim()) {
+    langName = _toDisplayName(language);
+  } else {
+    try {
+      const langInfo = await detectLanguage(message);
+      langName = langInfo.name || 'English';
+    } catch (_) {
+      langName = 'English';
     }
+  }
 
-    const reply = await callGroq(message, langInfo.name, context);
-
+  // ── Backend domain restriction (second layer after Flutter client check) ──
+  if (!isAgricultureQuery(message)) {
+    console.log(`[Chat] Blocked non-agri query: "${message.substring(0, 80)}"`);
     return res.json({
-      reply,
-      detectedLanguage: langInfo.name,
+      reply: getBlockMessage(langName),
+      detectedLanguage: langName,
+      blocked: true,
     });
+  }
+
+  console.log(`[Chat] Allowed agri query: "${message.substring(0, 80)}"`);
+
+  try {
+    const reply = await callGroq(message, langName, context);
+    return res.json({ reply, detectedLanguage: langName });
   } catch (err) {
     console.error('[Chat] Error:', err.message);
     return res.status(500).json({ error: 'Failed to get a response. Please try again.' });
   }
 };
 
-// ─── POST /api/gemini/voice  (voice input via CAMB.AI) ───────────────────────
-exports.voice = async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: 'No audio file uploaded. Use multipart/form-data with field "audio".' });
-  }
-
-  // File size guard (multer already enforces bytes limit, this is a secondary check)
-  const maxBytes = MAX_AUDIO_MB * 1024 * 1024;
-  if (req.file.size && req.file.size > maxBytes) {
-    return res.status(413).json({ error: `Audio file exceeds ${MAX_AUDIO_MB} MB limit.` });
-  }
-
-  try {
-    // ── Step 1: Speech → Text via CAMB.AI ───────────────────────────────────
-    let transcribedText;
-    let detectedLangInfo;
-
-    try {
-      const sttResult = await speechToText(
-        req.file.buffer,
-        req.file.originalname || 'audio.wav',
-        req.file.mimetype     || 'audio/wav',
-      );
-      transcribedText  = sttResult.text;
-      detectedLangInfo = await fromCambLanguage(sttResult.language, transcribedText);
-    } catch (cambErr) {
-      console.error('[Voice] CAMB.AI STT failed:', cambErr.message);
-      return res.status(502).json({
-        error: `Voice processing unavailable: ${cambErr.message}`,
-      });
-    }
-
-    // ── Step 2: Language override from client (optional) ─────────────────────
-    if (req.body?.language) {
-      detectedLangInfo = {
-        code2: _toLangCode(req.body.language),
-        name:  _toDisplayName(req.body.language),
-      };
-    }
-
-    // ── Step 3: Groq — respond in detected language ───────────────────────────
-    const reply = await callGroq(transcribedText, detectedLangInfo.name, null);
-
-    return res.json({
-      reply,
-      inputText:        transcribedText,
-      detectedLanguage: detectedLangInfo.name,
-    });
-
-  } catch (err) {
-    console.error('[Voice] Unexpected error:', err.message);
-    return res.status(500).json({ error: 'Voice processing failed. Please try again.' });
-  }
-};
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-// Map full language name (from app's languageProvider) → 2-letter code
-function _toLangCode(lang) {
-  switch ((lang || '').toLowerCase()) {
-    case 'telugu':   return 'te';
-    case 'hindi':    return 'hi';
-    case 'kannada':  return 'kn';
-    case 'tamil':    return 'ta';
-    case 'marathi':  return 'mr';
-    default:         return 'en';
-  }
-}
-
-// Map to display name for Groq prompt
 function _toDisplayName(lang) {
   const first = (lang || '').charAt(0).toUpperCase() + (lang || '').slice(1).toLowerCase();
   const valid  = ['Telugu', 'Hindi', 'Kannada', 'Tamil', 'Marathi', 'Bengali', 'Gujarati', 'Punjabi'];

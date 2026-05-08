@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -17,6 +18,13 @@ class HomeShell extends ConsumerWidget {
     required this.child,
     required this.currentPath,
   });
+
+  /// Whether we're on the "home" tab (index 0)
+  bool get _isOnHomeTab {
+    return currentPath == '/home/state' ||
+        currentPath == '/home' ||
+        currentPath == '/admin/schemes';
+  }
 
   Future<void> _logout(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
@@ -52,6 +60,51 @@ class HomeShell extends ConsumerWidget {
     if (context.mounted) context.go('/login');
   }
 
+  /// Handle Android back button press
+  Future<void> _handleBackButton(BuildContext context) async {
+    final isAdmin = currentPath.startsWith('/admin/');
+
+    if (!_isOnHomeTab) {
+      // Not on home tab → navigate to the home tab
+      if (isAdmin) {
+        context.go('/admin/schemes');
+      } else {
+        context.go('/home/state');
+      }
+    } else {
+      // Already on home tab → show exit confirmation
+      final shouldExit = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Exit KrishiMitra?'),
+          content: const Text('Are you sure you want to exit the app?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: Text('Stay',
+                  style: TextStyle(
+                      color: Theme.of(ctx).colorScheme.onSurfaceVariant)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: const Text('Exit'),
+            ),
+          ],
+        ),
+      );
+
+      if (shouldExit == true) {
+        SystemNavigator.pop(); // Clean exit
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final roleAsync  = ref.watch(authRoleProvider);
@@ -66,90 +119,97 @@ class HomeShell extends ConsumerWidget {
     if (currentPath.contains('/home/ai')) appBarTitle = 'AI Chat';
     if (currentPath.contains('/home/crop-advisor')) appBarTitle = 'Crop Advisor';
 
-    return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.background : AppTheme.backgroundLight,
-      appBar: AppBar(
+    return PopScope(
+      canPop: false, // We handle all back navigation ourselves
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop) return; // Already popped (shouldn't happen with canPop: false)
+        _handleBackButton(context);
+      },
+      child: Scaffold(
         backgroundColor:
             isDark ? AppTheme.background : AppTheme.backgroundLight,
-        title: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                gradient: AppTheme.primaryGradient,
-                borderRadius: BorderRadius.circular(8),
+        appBar: AppBar(
+          backgroundColor:
+              isDark ? AppTheme.background : AppTheme.backgroundLight,
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 28,
+                height: 28,
+                decoration: BoxDecoration(
+                  gradient: AppTheme.primaryGradient,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.eco_rounded, color: Colors.white, size: 16),
               ),
-              child: const Icon(Icons.eco_rounded, color: Colors.white, size: 16),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              appBarTitle,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+              const SizedBox(width: 8),
+              Text(
+                appBarTitle,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+            ],
+          ),
+          actions: [
+            // Language selector — only on user screens
+            if (!isAdminPath)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: const LanguageSelector(),
+              ),
+            Container(
+              margin: const EdgeInsets.only(right: 12),
+              child: IconButton(
+                tooltip: 'Logout',
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.redAccent.withOpacity(0.12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+                icon: const Icon(Icons.logout_rounded,
+                    size: 20, color: Colors.redAccent),
+                onPressed: () => _logout(context, ref),
+              ),
             ),
           ],
         ),
-        actions: [
-          // Language selector — only on user screens
-          if (!isAdminPath)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: const LanguageSelector(),
-            ),
-          Container(
-            margin: const EdgeInsets.only(right: 12),
-            child: IconButton(
-              tooltip: 'Logout',
-              style: IconButton.styleFrom(
-                backgroundColor: Colors.redAccent.withOpacity(0.12),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              icon: const Icon(Icons.logout_rounded,
-                  size: 20, color: Colors.redAccent),
-              onPressed: () => _logout(context, ref),
-            ),
-          ),
-        ],
-      ),
 
-      body: child,
+        body: child,
 
-      bottomNavigationBar: roleAsync.when(
-        loading: () => const SizedBox.shrink(),
-        error:   (_, __) => const SizedBox.shrink(),
-        data: (role) {
-          final isAdmin = role == AuthRole.admin || isAdminPath;
+        bottomNavigationBar: roleAsync.when(
+          loading: () => const SizedBox.shrink(),
+          error:   (_, __) => const SizedBox.shrink(),
+          data: (role) {
+            final isAdmin = role == AuthRole.admin || isAdminPath;
 
-          // ── Floating nav container ────────────────────────────────
-          return Container(
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF141928) : Colors.white,
-              border: Border(
-                top: BorderSide(
-                  color: isDark
-                      ? Colors.white.withOpacity(0.06)
-                      : Colors.black.withOpacity(0.06),
-                  width: 1,
+            // ── Floating nav container ────────────────────────────────
+            return Container(
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF141928) : Colors.white,
+                border: Border(
+                  top: BorderSide(
+                    color: isDark
+                        ? Colors.white.withOpacity(0.06)
+                        : Colors.black.withOpacity(0.06),
+                    width: 1,
+                  ),
                 ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.4 : 0.08),
+                    blurRadius: 24,
+                    offset: const Offset(0, -4),
+                  ),
+                ],
               ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(isDark ? 0.4 : 0.08),
-                  blurRadius: 24,
-                  offset: const Offset(0, -4),
-                ),
-              ],
-            ),
-            child: isAdmin
-                ? _AdminNav(currentPath: currentPath)
-                : _UserNav(currentPath: currentPath),
-          );
-        },
+              child: isAdmin
+                  ? _AdminNav(currentPath: currentPath)
+                  : _UserNav(currentPath: currentPath),
+            );
+          },
+        ),
       ),
     );
   }

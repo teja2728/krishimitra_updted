@@ -6,7 +6,6 @@ import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
 import '../app/providers/language_provider.dart';
 import '../l10n/app_strings.dart';
-import '../widgets/language_selector.dart';
 
 class LoginRegisterScreen extends ConsumerStatefulWidget {
   const LoginRegisterScreen({super.key});
@@ -61,10 +60,18 @@ class _LoginRegisterScreenState extends ConsumerState<LoginRegisterScreen>
         await authService.loginAdminWithCredentials(
             mobile: mobile, password: password);
         if (!mounted) return;
+        // Force all session-dependent providers to rebuild with the new user.
+        ref.invalidate(userProfileProvider);
+        ref.invalidate(authRoleProvider);
         context.go('/admin/schemes');
       } else {
         await authService.loginUser(mobile: mobile, password: password);
         if (!mounted) return;
+        // Force all session-dependent providers to rebuild with the new user.
+        ref.invalidate(userProfileProvider);
+        ref.invalidate(authRoleProvider);
+        ref.invalidate(bookmarksProvider);
+        ref.invalidate(remindersProvider);
         context.go('/home/state');
       }
     } catch (e) {
@@ -158,9 +165,6 @@ class _LoginRegisterScreenState extends ConsumerState<LoginRegisterScreen>
                           )),
                     ),
                     const SizedBox(height: 12),
-                    // ── Language selector ────────────────────────────
-                    Center(child: const LanguageSelector()),
-                    const SizedBox(height: 24),
                     Center(
                       child: Text(
                         ref.watch(trProvider)('select_language') == 'select_language'

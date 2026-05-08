@@ -1,29 +1,37 @@
+import 'dart:developer' as dev;
 import 'dart:math';
+
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-class SplashScreen extends StatefulWidget {
+import '../app/app_theme.dart';
+import '../app/providers/app_providers.dart';
+import '../models/auth_role.dart';
+
+class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  ConsumerState<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen>
+class _SplashScreenState extends ConsumerState<SplashScreen>
     with TickerProviderStateMixin {
+
   // Continuous loop for swaying crops + particles
   late final AnimationController _loopCtrl;
 
   // One-shot entrance sequence
   late final AnimationController _entranceCtrl;
 
-  late final Animation<double> _iconScale;
-  late final Animation<double> _iconFade;
-  late final Animation<double> _titleFade;
-  late final Animation<Offset> _titleSlide;
-  late final Animation<double> _subtitleFade;
-  late final Animation<Offset> _subtitleSlide;
-  late final Animation<double> _cropReveal;
+  late final Animation<double>  _iconScale;
+  late final Animation<double>  _iconFade;
+  late final Animation<double>  _titleFade;
+  late final Animation<Offset>  _titleSlide;
+  late final Animation<double>  _subtitleFade;
+  late final Animation<Offset>  _subtitleSlide;
+  late final Animation<double>  _cropReveal;
 
   @override
   void initState() {
@@ -105,10 +113,46 @@ class _SplashScreenState extends State<SplashScreen>
       ),
     );
 
-    Future.delayed(const Duration(milliseconds: 4000), () {
+    // Run session check after a minimum 1.8s for splash visibility,
+    // then navigate based on stored session.
+    Future.wait([
+      Future.delayed(const Duration(milliseconds: 1800)),
+      _checkSession(),
+    ]);
+  }
+
+  /// Reads persisted token + role and routes to the correct screen.
+  /// Never throws — any error defaults to login.
+  Future<void> _checkSession() async {
+    try {
+      final storage = ref.read(localUserStorageProvider);
+
+      final token = await storage.readJwtToken();
+      final role  = await storage.readRole();
+
+      dev.log('[Splash] Token present: ${token != null && token.isNotEmpty}');
+      dev.log('[Splash] Role stored: $role');
+
       if (!mounted) return;
-      context.go('/login');
-    });
+
+      if (token != null && token.isNotEmpty) {
+        // Valid session found — navigate directly to the correct home
+        if (role == AuthRole.admin) {
+          dev.log('[Splash] Resuming admin session → /admin/schemes');
+          context.go('/admin/schemes');
+        } else {
+          dev.log('[Splash] Resuming user session → /home/state');
+          context.go('/home/state');
+        }
+      } else {
+        // No session — go to login
+        dev.log('[Splash] No session found → /login');
+        context.go('/login');
+      }
+    } catch (e) {
+      dev.log('[Splash] Session check error: $e — defaulting to login');
+      if (mounted) context.go('/login');
+    }
   }
 
   @override
@@ -155,7 +199,7 @@ class _SplashScreenState extends State<SplashScreen>
                                   shape: BoxShape.circle,
                                   boxShadow: [
                                     BoxShadow(
-                                      color: const Color(0xFF4CAF50)
+                                      color: AppTheme.primary
                                           .withValues(alpha: glowAlpha),
                                       blurRadius: 36,
                                       spreadRadius: 10,
@@ -213,6 +257,23 @@ class _SplashScreenState extends State<SplashScreen>
                         ),
                       ),
                     ),
+
+                    const SizedBox(height: 36),
+
+                    // Subtle loading indicator — visible during session check
+                    FadeTransition(
+                      opacity: _subtitleFade,
+                      child: SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.5,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            AppTheme.primary.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -240,11 +301,11 @@ class _SplashScreenState extends State<SplashScreen>
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Crop Field Painter — white background, green rolling hills, wheat stalks.
+// Crop Field Painter — unchanged from original
 // ─────────────────────────────────────────────────────────────────────────────
 class _CropFieldPainter extends CustomPainter {
-  final double loopValue;     // 0..1 repeating
-  final double revealFraction; // 0..1 entrance reveal
+  final double loopValue;
+  final double revealFraction;
 
   _CropFieldPainter({
     required this.loopValue,
@@ -311,7 +372,6 @@ class _CropFieldPainter extends CustomPainter {
       final baseY = h * 0.83;
       final sway = sin(t * 0.75 + phase) * 4.5;
 
-      // Staggered grow-in: left crops appear first
       final cropReveal = (revealFraction * cropCount - i).clamp(0.0, 1.0);
       if (cropReveal <= 0) continue;
 
@@ -319,7 +379,6 @@ class _CropFieldPainter extends CustomPainter {
       final topX = baseX + sway;
       final topY = baseY - stemH;
 
-      // Stem
       stemPaint
         ..color = const Color(0xFF4CAF50)
         ..strokeWidth = 1.8;
@@ -336,7 +395,6 @@ class _CropFieldPainter extends CustomPainter {
         stemPaint,
       );
 
-      // Leaf
       if (cropReveal > 0.4) {
         final lf = ((cropReveal - 0.4) / 0.6).clamp(0.0, 1.0);
         canvas.save();
@@ -355,7 +413,6 @@ class _CropFieldPainter extends CustomPainter {
         canvas.restore();
       }
 
-      // Wheat head
       if (cropReveal > 0.72) {
         final hf = ((cropReveal - 0.72) / 0.28).clamp(0.0, 1.0);
         final headPaint = Paint()
@@ -374,7 +431,6 @@ class _CropFieldPainter extends CustomPainter {
           );
         }
 
-        // Tip dot
         canvas.drawCircle(
           Offset(topX, topY),
           2.8 * hf,

@@ -8,6 +8,13 @@ class UserProfile {
   final String soilType; // Black / Red
   final int landSize;
   final String role;
+  final String status;
+  final bool isOnline;
+  final DateTime? lastSeen;
+  final String suspensionReason;
+  final DateTime? deletedAt;
+  final String deviceType;
+  final DateTime? createdAt;
 
   const UserProfile({
     required this.id,
@@ -19,11 +26,18 @@ class UserProfile {
     required this.soilType,
     required this.landSize,
     required this.role,
+    this.status = 'ACTIVE',
+    this.isOnline = false,
+    this.lastSeen,
+    this.suspensionReason = '',
+    this.deletedAt,
+    this.deviceType = '',
+    this.createdAt,
   });
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
-      id: (json['id'] ?? '').toString(),
+      id: (json['id'] ?? json['_id'] ?? '').toString(),
       mobile: (json['mobile'] ?? '').toString(),
       name: (json['name'] ?? '').toString(),
       state: (json['state'] ?? '').toString(),
@@ -32,6 +46,13 @@ class UserProfile {
       soilType: (json['soilType'] ?? '').toString(),
       landSize: int.tryParse((json['landSize'] ?? '0').toString()) ?? 0,
       role: (json['role'] ?? 'user').toString(),
+      status: (json['status'] ?? 'ACTIVE').toString(),
+      isOnline: json['isOnline'] == true,
+      lastSeen: json['lastSeen'] != null ? DateTime.tryParse(json['lastSeen'].toString()) : null,
+      suspensionReason: (json['suspensionReason'] ?? '').toString(),
+      deletedAt: json['deletedAt'] != null ? DateTime.tryParse(json['deletedAt'].toString()) : null,
+      deviceType: (json['deviceType'] ?? '').toString(),
+      createdAt: json['createdAt'] != null ? DateTime.tryParse(json['createdAt'].toString()) : null,
     );
   }
 
@@ -45,6 +66,10 @@ class UserProfile {
         'soilType': soilType,
         'landSize': landSize,
         'role': role,
+        'status': status,
+        'isOnline': isOnline,
+        'suspensionReason': suspensionReason,
+        'deviceType': deviceType,
       };
 }
 

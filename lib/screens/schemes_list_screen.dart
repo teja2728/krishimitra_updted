@@ -378,7 +378,7 @@ class _SchemesListScreenState extends ConsumerState<SchemesListScreen> {
                                         bookmarkedIds.contains(scheme.id),
                                     isReminded:
                                         reminderIds.contains(scheme.id),
-                                    onTap: () => context.go(
+                                    onTap: () => context.push(
                                       '/scheme/${Uri.encodeComponent(scheme.id)}',
                                     ),
                                     onApply: () async {
@@ -547,29 +547,26 @@ class _FilterPanelState extends ConsumerState<_FilterPanel> {
                         fontWeight: FontWeight.w700,
                       )),
                 ),
-                _FilterCheckTile(
+                _FilterRadioTile(
                   label: tr('all_schemes'),
                   icon: Icons.all_inclusive_rounded,
-                  checked: _filter == SchemeFilter.all,
-                  onTap: () => setState(() => _filter = SchemeFilter.all),
+                  value: SchemeFilter.all,
+                  groupValue: _filter,
+                  onChanged: (v) => setState(() => _filter = v),
                 ),
-                _FilterCheckTile(
+                _FilterRadioTile(
                   label: tr('state_govt_schemes'),
                   icon: Icons.location_city_outlined,
-                  checked: _filter == SchemeFilter.state,
-                  onTap: () => setState(() => _filter =
-                      _filter == SchemeFilter.state
-                          ? SchemeFilter.all
-                          : SchemeFilter.state),
+                  value: SchemeFilter.state,
+                  groupValue: _filter,
+                  onChanged: (v) => setState(() => _filter = v),
                 ),
-                _FilterCheckTile(
+                _FilterRadioTile(
                   label: tr('central_govt_schemes'),
                   icon: Icons.account_balance_outlined,
-                  checked: _filter == SchemeFilter.central,
-                  onTap: () => setState(() => _filter =
-                      _filter == SchemeFilter.central
-                          ? SchemeFilter.all
-                          : SchemeFilter.central),
+                  value: SchemeFilter.central,
+                  groupValue: _filter,
+                  onChanged: (v) => setState(() => _filter = v),
                 ),
               ],
             ),
@@ -643,55 +640,51 @@ class _FilterPanelState extends ConsumerState<_FilterPanel> {
   }
 }
 
-// ─── Checkbox tile ────────────────────────────────────────────────────────────
+// ─── Category radio tile ──────────────────────────────────────────────────────
 
-class _FilterCheckTile extends StatelessWidget {
-  final String   label;
-  final IconData icon;
-  final bool     checked;
-  final VoidCallback onTap;
+class _FilterRadioTile extends StatelessWidget {
+  final String       label;
+  final IconData     icon;
+  final SchemeFilter value;
+  final SchemeFilter groupValue;
+  final ValueChanged<SchemeFilter> onChanged;
 
-  const _FilterCheckTile({
+  const _FilterRadioTile({
     required this.label,
     required this.icon,
-    required this.checked,
-    required this.onTap,
+    required this.value,
+    required this.groupValue,
+    required this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final selected = value == groupValue;
     final cs = Theme.of(context).colorScheme;
     return InkWell(
-      onTap: onTap,
+      onTap: () => onChanged(value),
       borderRadius: BorderRadius.circular(10),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: cs.onSurfaceVariant),
+            Icon(icon,
+                size: 20,
+                color: selected ? cs.primary : cs.onSurfaceVariant),
             const SizedBox(width: 12),
             Expanded(
               child: Text(label,
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         fontWeight:
-                            checked ? FontWeight.w600 : FontWeight.normal,
+                            selected ? FontWeight.w600 : FontWeight.normal,
+                        color: selected ? cs.primary : null,
                       )),
             ),
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 22,
-              height: 22,
-              decoration: BoxDecoration(
-                color: checked ? cs.primary : Colors.transparent,
-                border: Border.all(
-                  color: checked ? cs.primary : cs.outline.withOpacity(0.6),
-                  width: 2,
-                ),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: checked
-                  ? const Icon(Icons.check, size: 14, color: Colors.white)
-                  : null,
+            Radio<SchemeFilter>(
+              value: value,
+              groupValue: groupValue,
+              onChanged: (_) => onChanged(value),
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
           ],
         ),

@@ -1,7 +1,11 @@
 import 'dart:io';
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 import '../app/app_theme.dart';
 import '../services/farm_advisory_service.dart';
 
@@ -377,9 +381,79 @@ class _ResultView extends StatefulWidget {
 class _ResultViewState extends State<_ResultView> {
   bool _pdfLoading = false;
 
+  // ── Storage helpers ─────────────────────────────────────────────────────────
+
+  /// Request WRITE_EXTERNAL_STORAGE on Android ≤12; Android 13+ doesn't need it.
+  Future<bool> _requestStoragePermission() async {
+    if (!Platform.isAndroid) return true;
+    try {
+      final sdk = await _androidSdk();
+      if (sdk >= 33) return true; // Android 13+ uses scoped storage
+      final status = await Permission.storage.request();
+      if (status.isGranted) return true;
+      if (status.isPermanentlyDenied) await openAppSettings();
+      return false;
+    } catch (_) {
+      // If we can't determine SDK, request anyway
+      final status = await Permission.storage.request();
+      return status.isGranted;
+    }
+  }
+
+  Future<int> _androidSdk() async {
+    try {
+      final r = await Process.run('getprop', ['ro.build.version.sdk']);
+      return int.tryParse(r.stdout.toString().trim()) ?? 29;
+    } catch (_) {
+      return 29;
+    }
+  }
+
+  Future<Directory?> _getDownloadsDir() async {
+    if (Platform.isAndroid) {
+      const path = '/storage/emulated/0/Download';
+      final d = Directory(path);
+      if (await d.exists()) return d;
+      final ext = await getExternalStorageDirectories();
+      if (ext != null && ext.isNotEmpty) {
+        final root = ext.first.path.split('/Android').first;
+        final dl = Directory('$root/Download');
+        if (await dl.exists()) return dl;
+        return ext.first;
+      }
+    }
+    return await getApplicationDocumentsDirectory();
+  }
+
+  // ── Main download handler ───────────────────────────────────────────────────
+
   Future<void> _downloadPDF() async {
     setState(() => _pdfLoading = true);
+    final sm = ScaffoldMessenger.of(context);
     try {
+      // 1. Request permission
+      final granted = await _requestStoragePermission();
+      if (!granted) {
+        if (!mounted) return;
+        sm.showSnackBar(const SnackBar(
+          content: Text('Storage permission required to save PDF.'),
+          backgroundColor: Colors.orange,
+        ));
+        return;
+      }
+
+      // 2. Show progress
+      sm.showSnackBar(SnackBar(
+        content: Row(children: const [
+          SizedBox(width: 18, height: 18,
+            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)),
+          SizedBox(width: 12),
+          Text('Generating & saving PDF…'),
+        ]),
+        duration: const Duration(seconds: 60),
+      ));
+
+      // 3. Fetch PDF bytes from backend
       final service = FarmAdvisoryService();
       final bytes = await service.downloadPDF(
         input:    widget.result.inputSnapshot,
@@ -389,35 +463,116 @@ class _ResultViewState extends State<_ResultView> {
       );
       service.dispose();
 
-      // Save to temp dir and open
-      final dir  = await getTemporaryDirectory();
+      if (bytes.isEmpty) throw Exception('Server returned empty PDF');
+
+      // 4. Resolve Downloads folder
+      final dir = await _getDownloadsDir();
+      if (dir == null) throw Exception('Could not access Downloads folder');
+
       final crop = (widget.result.inputSnapshot['crop'] ?? 'advisory')
-          .toString().replaceAll(' ', '-');
-      final file = File('${dir.path}/KrishiMitra-$crop.pdf');
-      await file.writeAsBytes(bytes);
+          .toString()
+          .trim()
+          .replaceAll(RegExp(r'[^\w\s-]'), '')
+          .replaceAll(' ', '-');
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'KrishiMitra-$crop-$timestamp.pdf';
+      final file = File('${dir.path}/$fileName');
+
+      // 5. Write to disk
+      await file.writeAsBytes(bytes, flush: true);
+
+      // 6. Verify file exists and is non-empty
+      if (!await file.exists() || await file.length() == 0) {
+        throw Exception('File write failed — disk may be full');
+      }
+
+      dev.log('[CropAdvisor] PDF saved to: ${file.path}');
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PDF saved: ${file.path.split('/').last}'),
-          action: SnackBarAction(
-            label: 'OK',
-            onPressed: () {},
-          ),
-          duration: const Duration(seconds: 4),
-        ),
-      );
+      sm.hideCurrentSnackBar();
+
+      // 7. Show success + open/share dialog
+      _showPdfSuccessSheet(file);
+
     } catch (e) {
+      dev.log('[CropAdvisor] PDF error: $e');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PDF failed: ${e.toString().replaceFirst('Exception: ', '')}'),
-          backgroundColor: Colors.redAccent,
-        ),
-      );
+      sm.hideCurrentSnackBar();
+      sm.showSnackBar(SnackBar(
+        content: Text('Failed to save PDF: ${e.toString().replaceFirst('Exception: ', '')}'),
+        backgroundColor: Colors.redAccent,
+        duration: const Duration(seconds: 5),
+      ));
     } finally {
       if (mounted) setState(() => _pdfLoading = false);
     }
+  }
+
+  /// Bottom-sheet with Open / Share / Dismiss options after a successful save.
+  void _showPdfSuccessSheet(File file) {
+    final fileName = file.path.split('/').last;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark
+              ? AppTheme.surface : Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: const Color(0xFF00C896).withOpacity(0.30)),
+        ),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.check_circle_rounded,
+              color: Color(0xFF00C896), size: 48),
+          const SizedBox(height: 12),
+          Text('PDF Saved!',
+            style: Theme.of(context).textTheme.titleMedium
+                ?.copyWith(fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text(fileName,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.bodySmall
+                ?.copyWith(color: const Color(0xFF00C896))),
+          const SizedBox(height: 4),
+          Text('Saved to Downloads folder',
+            style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 20),
+          Row(children: [
+            Expanded(child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pop(context);
+                OpenFilex.open(file.path, type: 'application/pdf');
+              },
+              icon: const Icon(Icons.open_in_new_rounded, size: 18),
+              label: const Text('Open PDF'),
+            )),
+            const SizedBox(width: 12),
+            Expanded(child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primary),
+              onPressed: () {
+                Navigator.pop(context);
+                Share.shareXFiles(
+                  [XFile(file.path, mimeType: 'application/pdf')],
+                  subject: 'KrishiMitra Crop Advisory PDF',
+                );
+              },
+              icon: const Icon(Icons.share_rounded, size: 18,
+                  color: Colors.white),
+              label: const Text('Share',
+                  style: TextStyle(color: Colors.white)),
+            )),
+          ]),
+          const SizedBox(height: 8),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Dismiss'),
+          ),
+        ]),
+      ),
+    );
   }
 
   @override

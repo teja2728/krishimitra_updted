@@ -46,5 +46,15 @@ class SchemesRepository {
   Future<void> saveAllSchemes(List<Scheme> schemes) {
     return _adminStore.writeStoredSchemes(schemes);
   }
+
+  /// Clears both the admin cache and the offline schemes cache.
+  ///
+  /// Must be called whenever the user changes their state so the next
+  /// [fetchSchemesWithAdminOverrides] call bypasses stale cached data
+  /// and fetches fresh, state-specific schemes from the backend.
+  Future<void> clearSchemeCache() async {
+    await _adminStore.clear();
+    await _api.clearOfflineSchemesCache();
+  }
 }
 

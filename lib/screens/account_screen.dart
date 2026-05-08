@@ -53,10 +53,11 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
   }
 
   Future<void> _save(UserProfile existing) async {
-    final storage = ref.read(localUserStorageProvider);
-    final api     = ref.read(apiServiceProvider);
-    final name    = _nameController.text.trim();
-    final landSize = int.tryParse(_acresController.text.trim()) ?? 0;
+    final storage    = ref.read(localUserStorageProvider);
+    final api        = ref.read(apiServiceProvider);
+    final repository = ref.read(schemesRepositoryProvider);
+    final name       = _nameController.text.trim();
+    final landSize   = int.tryParse(_acresController.text.trim()) ?? 0;
 
     if (name.isEmpty || landSize <= 0 || _selectedCrops.isEmpty) {
       if (!mounted) return;
@@ -65,6 +66,8 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       );
       return;
     }
+
+    final stateChanged = _selectedState != existing.state;
 
     final updated = UserProfile(
       id:       existing.id,
@@ -81,6 +84,14 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
     await storage.updateProfile(updated);
     ref.invalidate(userProfileProvider);
     setState(() => _isEditing = false);
+
+    // If the user changed their state, bust both scheme caches so the next
+    // "Fetch From Server" (or automatic invalidation below) gets
+    // state-specific schemes from the backend instead of the stale cache.
+    if (stateChanged) {
+      await repository.clearSchemeCache();
+      ref.invalidate(schemesProvider);
+    }
 
     try {
       final serverProfile = await api.updateProfile(updated);
@@ -112,11 +123,79 @@ class _AccountScreenState extends ConsumerState<AccountScreen> {
       body: profileAsync.when(
         loading: () => const Center(
             child: CircularProgressIndicator(color: AppTheme.primary)),
-        error: (err, _) =>
-            Center(child: Text('Failed to load profile: $err')),
+        error: (err, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.error_outline_rounded,
+                    size: 56, color: Colors.redAccent.withValues(alpha: 0.7)),
+                const SizedBox(height: 16),
+                Text('Failed to load profile',
+                    style: tt.titleSmall
+                        ?.copyWith(fontWeight: FontWeight.w600)),
+                const SizedBox(height: 8),
+                Text('$err',
+                    textAlign: TextAlign.center,
+                    style: tt.bodySmall),
+                const SizedBox(height: 20),
+                ElevatedButton.icon(
+                  onPressed: () => ref.invalidate(userProfileProvider),
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('Retry'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
         data: (profile) {
           if (profile == null) {
-            return const Center(child: Text('No profile found.'));
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person_off_rounded,
+                        size: 56,
+                        color: Theme.of(context)
+                            .colorScheme
+                            .outline
+                            .withValues(alpha: 0.6)),
+                    const SizedBox(height: 16),
+                    Text('No profile found',
+                        style: tt.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Your profile could not be loaded.\nTry logging in again or tap Retry.',
+                      textAlign: TextAlign.center,
+                      style: tt.bodySmall,
+                    ),
+                    const SizedBox(height: 20),
+                    ElevatedButton.icon(
+                      onPressed: () =>
+                          ref.invalidate(userProfileProvider),
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('Retry'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primary,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
           }
 
           final isAdmin = roleAsync.valueOrNull == AuthRole.admin;

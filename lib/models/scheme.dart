@@ -78,13 +78,22 @@ class Scheme {
         'approved': approved,
       };
 
+  /// Returns true if this scheme is relevant to [farmerState].
+  ///
+  /// Rules (in priority order):
+  /// 1. Central schemes always match any state.
+  /// 2. State schemes tagged "All India" or "All" match any state.
+  /// 3. If the farmer has no state preference yet, show everything.
+  /// 4. State schemes with an empty [state] field are shown (data quality gap).
+  /// 5. Otherwise do a case-insensitive substring check so slight naming
+  ///    variations ("Andhra Pradesh" ↔ "andhra pradesh") still match.
   bool matchesFarmerState(String farmerState) {
     if (type != SchemeType.state) return true;
     final schemeState = state.trim().toLowerCase();
     if (schemeState == 'all india' || schemeState == 'all') return true;
     final farmer = farmerState.trim().toLowerCase();
     if (farmer.isEmpty) return true;
-    if (schemeState.isEmpty) return false;
-    return schemeState == farmer;
+    if (schemeState.isEmpty) return true; // show rather than hide
+    return schemeState.contains(farmer) || farmer.contains(schemeState);
   }
 }

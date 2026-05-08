@@ -29,6 +29,7 @@ class LocalUserStorage {
     return null;
   }
 
+  /// Removes ALL stored data — only call on account deletion or full reset.
   Future<void> clear() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_key);
@@ -36,6 +37,18 @@ class LocalUserStorage {
     await prefs.remove(_jwtKey);
     await prefs.remove(_backendUserIdKey);
     await prefs.remove(_offlineSchemesKey);
+  }
+
+  /// Removes auth credentials ONLY (JWT, role, userId).
+  /// Deliberately preserves bookmark and reminder caches so they survive
+  /// logout and are available as fallback until the next backend sync.
+  Future<void> clearAuthOnly() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_key);            // user profile/auth data
+    await prefs.remove(_roleKey);        // role
+    await prefs.remove(_jwtKey);         // JWT token
+    await prefs.remove(_backendUserIdKey); // backend user id
+    // NOTE: _offlineSchemesKey, bookmarks, reminders are intentionally kept
   }
 
   Future<void> saveSession({
@@ -109,5 +122,11 @@ class LocalUserStorage {
   Future<String?> getOfflineSchemes() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_offlineSchemesKey);
+  }
+
+  /// Removes the offline schemes cache so the next fetch goes to the network.
+  Future<void> clearOfflineSchemes() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_offlineSchemesKey);
   }
 }

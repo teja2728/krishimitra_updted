@@ -1,11 +1,15 @@
+import 'dart:developer' as dev;
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../app/app_theme.dart';
 import '../app/providers/app_providers.dart';
 import '../l10n/app_strings.dart';
 import '../models/scheme.dart';
 import '../services/url_service.dart';
+import '../services/pdf_download_service.dart';
 
 class SchemeDetailsScreen extends ConsumerStatefulWidget {
   final String schemeId;
@@ -37,9 +41,60 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
     super.dispose();
   }
 
-  Color get _typeColor => widget.schemeId.isNotEmpty
-      ? AppTheme.primary
-      : const Color(0xFF00A3FF);
+  /// Safe back navigation: tries GoRouter pop first, falls back to Navigator.pop
+  void _goBack() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      // Fallback: navigate to home if there's nothing to pop to
+      context.go('/home/state');
+    }
+  }
+
+  /// Safely launch a URL with full error handling
+  Future<void> _launchUrl(String rawUrl) async {
+    final link = rawUrl.trim();
+    if (link.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No link available for this scheme.'),
+          backgroundColor: Colors.orangeAccent,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await UrlService.openUrl(link);
+    } catch (e) {
+      dev.log('[SchemeDetails] Failed to open URL: $link — $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white, size: 18),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Could not open link: ${e.toString()}')),
+            ],
+          ),
+          backgroundColor: Colors.redAccent,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  /// Download PDF from a URL
+  Future<void> _downloadPdf(String rawUrl, String schemeName) async {
+    final safeName = '${schemeName.replaceAll(RegExp(r'[^\w\s]'), '_')}.pdf';
+    await PdfDownloadService.downloadPdf(
+      rawUrl: rawUrl,
+      fileName: safeName,
+      scaffoldMessenger: ScaffoldMessenger.of(context),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -52,317 +107,350 @@ class _SchemeDetailsScreenState extends ConsumerState<SchemeDetailsScreen>
     final isDark         = Theme.of(context).brightness == Brightness.dark;
     final tt             = Theme.of(context).textTheme;
 
-    return Scaffold(
-      body: schemesAsync.when(
-        loading: () => const Center(
-            child: CircularProgressIndicator(color: AppTheme.primary)),
-        error:   (err, _) => Center(child: Text('Error: $err')),
-        data:    (schemes) {
+    return PopScope(
+      canPop: true,
+      child: Scaffold(
+        body: schemesAsync.when(
+          loading: () => const Center(
+              child: CircularProgressIndicator(color: AppTheme.primary)),
+          error:   (err, _) => Center(child: Text('Error: $err')),
+          data:    (schemes) {
+            final scheme = schemes
+                .where((s) => s.id == widget.schemeId)
+                .cast<Scheme?>()
+                .firstWhere((_) => true, orElse: () => null);
+
+            if (scheme == null) {
+              return Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.search_off_rounded,
+                        size: 64,
+                        color: Theme.of(context).colorScheme.outline),
+                    const SizedBox(height: 16),
+                    Text('Scheme not found',
+                        style: tt.titleMedium),
+                    const SizedBox(height: 16),
+                    TextButton.icon(
+                      onPressed: _goBack,
+                      icon: const Icon(Icons.arrow_back_rounded),
+                      label: const Text('Go Back'),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            final isBookmarked = bookmarkedIds.contains(scheme.id);
+            final isReminded   = reminderIds.contains(scheme.id);
+            final isCentral    = scheme.type == SchemeType.central;
+            final typeColor    = isCentral
+                ? const Color(0xFF00A3FF)
+                : AppTheme.primary;
+
+            // Check if applyLink looks like a PDF
+            final isPdfLink = scheme.applyLink.trim().toLowerCase().endsWith('.pdf');
+
+            return FadeTransition(
+              opacity: _fadeAnim,
+              child: CustomScrollView(
+                slivers: [
+                  // ── Hero app bar ─────────────────────────────────
+                  SliverAppBar(
+                    expandedHeight: 200,
+                    pinned: true,
+                    backgroundColor:
+                        isDark ? AppTheme.background : AppTheme.backgroundLight,
+                    leading: IconButton(
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: isDark
+                              ? Colors.white.withOpacity(0.08)
+                              : Colors.black.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(Icons.arrow_back_rounded,
+                            size: 18,
+                            color: isDark ? Colors.white : Colors.black),
+                      ),
+                      onPressed: _goBack,
+                    ),
+                    actions: [
+                      _AppBarAction(
+                        icon: isBookmarked
+                            ? Icons.bookmark_rounded
+                            : Icons.bookmark_outline_rounded,
+                        color: isBookmarked ? AppTheme.accent : null,
+                        onTap: () async {
+                          await ref
+                              .read(bookmarksProvider.notifier)
+                              .toggle(scheme.id);
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      _AppBarAction(
+                        icon: isReminded
+                            ? Icons.notifications_active_rounded
+                            : Icons.notifications_none_rounded,
+                        color: isReminded ? AppTheme.primary : null,
+                        onTap: () async {
+                          await ref
+                              .read(remindersProvider.notifier)
+                              .toggle(scheme.id);
+                        },
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    flexibleSpace: FlexibleSpaceBar(
+                      background: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              typeColor.withOpacity(0.85),
+                              typeColor.withOpacity(0.3),
+                            ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(20, 80, 20, 20),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              _TypeBadge(
+                                  label: isCentral ? tr('central') : tr('state'),
+                                  color: typeColor),
+                              const SizedBox(height: 10),
+                              Text(
+                                scheme.name,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.2,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+
+                  // ── Body ─────────────────────────────────────────
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        // State tag
+                        if (scheme.type == SchemeType.state &&
+                            scheme.state.trim().isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 16),
+                            child: Row(
+                              children: [
+                                Icon(Icons.place_rounded,
+                                    size: 16,
+                                    color: typeColor),
+                                const SizedBox(width: 6),
+                                Text(scheme.state,
+                                    style: tt.labelMedium?.copyWith(
+                                        color: typeColor,
+                                        fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          ),
+
+                        // Description card
+                        _SectionCard(
+                          title: tr('overview'),
+                          icon: Icons.info_outline_rounded,
+                          typeColor: typeColor,
+                          child: Text(scheme.description,
+                              style: tt.bodyMedium?.copyWith(height: 1.6)),
+                        ),
+                        const SizedBox(height: 12),
+
+                        // Benefits
+                        if (scheme.benefits.isNotEmpty) ...[
+                          _SectionCard(
+                            title: tr('benefits'),
+                            icon: Icons.star_outline_rounded,
+                            typeColor: typeColor,
+                            child: Column(
+                              children: scheme.benefits
+                                  .map((b) => _BulletItem(text: b,
+                                      color: typeColor))
+                                  .toList(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // Eligibility
+                        if (scheme.eligibility.isNotEmpty) ...[
+                          _SectionCard(
+                            title: tr('eligibility'),
+                            icon: Icons.verified_user_outlined,
+                            typeColor: typeColor,
+                            child: Column(
+                              children: scheme.eligibility
+                                  .map((e) => _BulletItem(text: e,
+                                      color: typeColor))
+                                  .toList(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // Documents
+                        if (scheme.documents.isNotEmpty) ...[
+                          _SectionCard(
+                            title: tr('documents'),
+                            icon: Icons.description_outlined,
+                            typeColor: typeColor,
+                            child: Column(
+                              children: scheme.documents
+                                  .map((d) => _BulletItem(text: d,
+                                      color: typeColor))
+                                  .toList(),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                        ],
+
+                        // Deadline
+                        if (scheme.deadline.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: AppTheme.accent.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                  color: AppTheme.accent.withOpacity(0.3)),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.schedule_rounded,
+                                    color: AppTheme.accent, size: 20),
+                                const SizedBox(width: 10),
+                                Text('${tr('last_date')}: ${scheme.deadline}',
+                                    style: tt.labelMedium?.copyWith(
+                                      color: AppTheme.accent,
+                                      fontWeight: FontWeight.w600,
+                                    )),
+                              ],
+                            ),
+                          ),
+
+                        // Download PDF button (if link ends with .pdf)
+                        if (isPdfLink) ...[
+                          const SizedBox(height: 16),
+                          GestureDetector(
+                            onTap: () => _downloadPdf(
+                                scheme.applyLink, scheme.name),
+                            child: Container(
+                              height: 48,
+                              decoration: BoxDecoration(
+                                color: isDark
+                                    ? Colors.white.withOpacity(0.08)
+                                    : Colors.black.withOpacity(0.05),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: typeColor.withOpacity(0.3),
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.download_rounded,
+                                      color: typeColor, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    tr('download_pdf'),
+                                    style: TextStyle(
+                                      color: typeColor,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ]),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+
+        // ── Sticky Apply button ────────────────────────────────────
+        bottomNavigationBar: schemesAsync.whenData((schemes) {
           final scheme = schemes
               .where((s) => s.id == widget.schemeId)
               .cast<Scheme?>()
               .firstWhere((_) => true, orElse: () => null);
+          if (scheme == null) return null;
+          final isCentral = scheme.type == SchemeType.central;
+          final typeColor =
+              isCentral ? const Color(0xFF00A3FF) : AppTheme.primary;
 
-          if (scheme == null) {
-            return Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.search_off_rounded,
-                      size: 64,
-                      color: Theme.of(context).colorScheme.outline),
-                  const SizedBox(height: 16),
-                  Text('Scheme not found',
-                      style: tt.titleMedium),
-                ],
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: SizedBox(
+                height: 54,
+                child: GestureDetector(
+                  onTap: () => _launchUrl(scheme.applyLink),
+                  child: Container(
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [typeColor, typeColor.withOpacity(0.75)],
+                        begin: Alignment.centerLeft,
+                        end: Alignment.centerRight,
+                      ),
+                      borderRadius: BorderRadius.circular(16),
+                      boxShadow: [
+                        BoxShadow(
+                          color: typeColor.withOpacity(0.4),
+                          blurRadius: 16,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const Icon(Icons.open_in_new_rounded,
+                            color: Colors.white, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          tr('apply_now'),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
               ),
-            );
-          }
-
-          final isBookmarked = bookmarkedIds.contains(scheme.id);
-          final isReminded   = reminderIds.contains(scheme.id);
-          final isCentral    = scheme.type == SchemeType.central;
-          final typeColor    = isCentral
-              ? const Color(0xFF00A3FF)
-              : AppTheme.primary;
-
-          return FadeTransition(
-            opacity: _fadeAnim,
-            child: CustomScrollView(
-              slivers: [
-                // ── Hero app bar ─────────────────────────────────
-                SliverAppBar(
-                  expandedHeight: 200,
-                  pinned: true,
-                  backgroundColor:
-                      isDark ? AppTheme.background : AppTheme.backgroundLight,
-                  leading: IconButton(
-                    icon: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: isDark
-                            ? Colors.white.withOpacity(0.08)
-                            : Colors.black.withOpacity(0.06),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Icon(Icons.arrow_back_rounded,
-                          size: 18,
-                          color: isDark ? Colors.white : Colors.black),
-                    ),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                  actions: [
-                    _AppBarAction(
-                      icon: isBookmarked
-                          ? Icons.bookmark_rounded
-                          : Icons.bookmark_outline_rounded,
-                      color: isBookmarked ? AppTheme.accent : null,
-                      onTap: () async {
-                        await ref
-                            .read(bookmarksProvider.notifier)
-                            .toggle(scheme.id);
-                      },
-                    ),
-                    const SizedBox(width: 4),
-                    _AppBarAction(
-                      icon: isReminded
-                          ? Icons.notifications_active_rounded
-                          : Icons.notifications_none_rounded,
-                      color: isReminded ? AppTheme.primary : null,
-                      onTap: () async {
-                        await ref
-                            .read(remindersProvider.notifier)
-                            .toggle(scheme.id);
-                      },
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  flexibleSpace: FlexibleSpaceBar(
-                    background: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            typeColor.withOpacity(0.85),
-                            typeColor.withOpacity(0.3),
-                          ],
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                        ),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 80, 20, 20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          children: [
-                            _TypeBadge(
-                                label: isCentral ? tr('central') : tr('state'),
-                                color: typeColor),
-                            const SizedBox(height: 10),
-                            Text(
-                              scheme.name,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800,
-                                height: 1.2,
-                              ),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-
-                // ── Body ─────────────────────────────────────────
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 120),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      // State tag
-                      if (scheme.type == SchemeType.state &&
-                          scheme.state.trim().isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: Row(
-                            children: [
-                              Icon(Icons.place_rounded,
-                                  size: 16,
-                                  color: typeColor),
-                              const SizedBox(width: 6),
-                              Text(scheme.state,
-                                  style: tt.labelMedium?.copyWith(
-                                      color: typeColor,
-                                      fontWeight: FontWeight.w600)),
-                            ],
-                          ),
-                        ),
-
-                      // Description card
-                      _SectionCard(
-                        title: tr('overview'),
-                        icon: Icons.info_outline_rounded,
-                        typeColor: typeColor,
-                        child: Text(scheme.description,
-                            style: tt.bodyMedium?.copyWith(height: 1.6)),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Benefits
-                      if (scheme.benefits.isNotEmpty) ...[
-                        _SectionCard(
-                          title: tr('benefits'),
-                          icon: Icons.star_outline_rounded,
-                          typeColor: typeColor,
-                          child: Column(
-                            children: scheme.benefits
-                                .map((b) => _BulletItem(text: b,
-                                    color: typeColor))
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      // Eligibility
-                      if (scheme.eligibility.isNotEmpty) ...[
-                        _SectionCard(
-                          title: tr('eligibility'),
-                          icon: Icons.verified_user_outlined,
-                          typeColor: typeColor,
-                          child: Column(
-                            children: scheme.eligibility
-                                .map((e) => _BulletItem(text: e,
-                                    color: typeColor))
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      // Documents
-                      if (scheme.documents.isNotEmpty) ...[
-                        _SectionCard(
-                          title: tr('documents'),
-                          icon: Icons.description_outlined,
-                          typeColor: typeColor,
-                          child: Column(
-                            children: scheme.documents
-                                .map((d) => _BulletItem(text: d,
-                                    color: typeColor))
-                                .toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      // Deadline
-                      if (scheme.deadline.isNotEmpty)
-                        Container(
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: AppTheme.accent.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                                color: AppTheme.accent.withOpacity(0.3)),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(Icons.schedule_rounded,
-                                  color: AppTheme.accent, size: 20),
-                              const SizedBox(width: 10),
-                              Text('${tr('last_date')}: ${scheme.deadline}',
-                                  style: tt.labelMedium?.copyWith(
-                                    color: AppTheme.accent,
-                                    fontWeight: FontWeight.w600,
-                                  )),
-                            ],
-                          ),
-                        ),
-                    ]),
-                  ),
-                ),
-              ],
             ),
           );
-        },
+        }).valueOrNull,
       ),
-
-      // ── Sticky Apply button ────────────────────────────────────
-      bottomNavigationBar: schemesAsync.whenData((schemes) {
-        final scheme = schemes
-            .where((s) => s.id == widget.schemeId)
-            .cast<Scheme?>()
-            .firstWhere((_) => true, orElse: () => null);
-        if (scheme == null) return null;
-        final isCentral = scheme.type == SchemeType.central;
-        final typeColor =
-            isCentral ? const Color(0xFF00A3FF) : AppTheme.primary;
-
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-            child: SizedBox(
-              height: 54,
-              child: GestureDetector(
-                onTap: () async {
-                  final link = scheme.applyLink.trim();
-                  if (link.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                          content: Text('No apply link available.')),
-                    );
-                    return;
-                  }
-                  try {
-                    await UrlService.openUrl(link);
-                  } catch (e) {
-                    if (!context.mounted) return;
-                    ScaffoldMessenger.of(context)
-                        .showSnackBar(SnackBar(content: Text(e.toString())));
-                  }
-                },
-                child: Container(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [typeColor, typeColor.withOpacity(0.75)],
-                      begin: Alignment.centerLeft,
-                      end: Alignment.centerRight,
-                    ),
-                    borderRadius: BorderRadius.circular(16),
-                    boxShadow: [
-                      BoxShadow(
-                        color: typeColor.withOpacity(0.4),
-                        blurRadius: 16,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.open_in_new_rounded,
-                          color: Colors.white, size: 18),
-                      const SizedBox(width: 8),
-                      Text(
-                        tr('apply_now'),
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        );
-      }).valueOrNull,
     );
   }
 }

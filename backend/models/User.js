@@ -15,6 +15,16 @@ const userSchema = new mongoose.Schema(
       enum: ['user', 'admin'],
       default: 'user',
     },
+    status: {
+      type: String,
+      enum: ['ACTIVE', 'SUSPENDED', 'BLOCKED', 'DELETED'],
+      default: 'ACTIVE',
+    },
+    isOnline: { type: Boolean, default: false },
+    lastSeen: { type: Date, default: Date.now },
+    suspensionReason: { type: String, default: '' },
+    deletedAt: { type: Date, default: null },
+    deviceType: { type: String, default: '' },
   },
   { timestamps: true }
 );

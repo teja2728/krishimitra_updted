@@ -20,14 +20,22 @@ dependencies:
   http: ^1.2.2
   google_fonts: ^6.2.1
   path_provider: ^2.1.5
-  record: ^5.1.2          # microphone recording for voice input
-  permission_handler: ^11.3.1  # runtime mic permissions
-  http_parser: ^4.0.2         # MediaType for multipart uploads
+  permission_handler: ^11.3.1
+  open_filex: ^4.6.0
+  share_plus: ^10.1.4
+
 
 dev_dependencies:
+  flutter_launcher_icons: ^0.13.1
+
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
 
 flutter:
   uses-material-design: true

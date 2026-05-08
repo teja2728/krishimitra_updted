@@ -1,7 +1,5 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
-import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:http/http.dart' as http;
 
 import '../models/auth_role.dart';
@@ -10,11 +8,7 @@ import '../models/user_profile.dart';
 import 'local_user_storage.dart';
 
 String resolveApiBaseUrl() {
-  if (kIsWeb) return 'http://localhost:5000/api';
-  if (defaultTargetPlatform == TargetPlatform.android) {
-    return 'http://10.0.2.2:5000/api';
-  }
-  return 'http://localhost:5000/api';
+  return 'https://backend-krishi-5pvx.onrender.com/api';
 }
 
 class ApiException implements Exception {
@@ -225,7 +219,7 @@ class ApiService {
     );
     _throwIfError(res);
     final list = jsonDecode(res.body) as List? ?? const [];
-    // The new response returns array of UserScheme docs. Extract schemeId.id or just schemeId
+    // Response contains UserScheme docs: { schemeId: "...", bookmarked: true, ... }
     return list.map((e) {
       if (e is Map) {
         final scheme = e['schemeId'];
@@ -233,7 +227,39 @@ class ApiService {
         return scheme?.toString() ?? '';
       }
       return e.toString();
-    }).toSet();
+    }).where((id) => id.isNotEmpty).toSet();
+  }
+
+  /// Fetches scheme IDs that have a pending reminder for [userId].
+  Future<Set<String>> fetchReminderSchemeIds(String userId) async {
+    final res = await _client.get(
+      _uri('/bookmark/$userId/reminders'),
+      headers: await _headers(auth: true),
+    );
+    _throwIfError(res);
+    final list = jsonDecode(res.body) as List? ?? const [];
+    return list.map((e) {
+      if (e is Map) {
+        final scheme = e['schemeId'];
+        if (scheme is Map) return scheme['id']?.toString() ?? '';
+        return scheme?.toString() ?? '';
+      }
+      return e.toString();
+    }).where((id) => id.isNotEmpty).toSet();
+  }
+
+  /// Sets or clears a reminder for [schemeId].
+  /// Pass a future [reminderDate] to enable; pass null to remove the reminder.
+  Future<void> setReminder(String schemeId, DateTime? reminderDate) async {
+    final res = await _client.post(
+      _uri('/bookmark'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({
+        'schemeId': schemeId,
+        'reminderDate': reminderDate?.toUtc().toIso8601String(),
+      }),
+    );
+    _throwIfError(res);
   }
 
   Future<void> sendFeedback(String message) async {
@@ -258,6 +284,25 @@ class ApiService {
     return decoded.whereType<Map<String, dynamic>>().toList(growable: false);
   }
 
+  /// Fetches the current user's profile from the backend.
+  ///
+  /// Returns `null` if the request fails or the user is not found,
+  /// so callers can fall back to local storage gracefully.
+  Future<UserProfile?> fetchProfile() async {
+    try {
+      final res = await _client.get(
+        _uri('/auth/profile'),
+        headers: await _headers(auth: true),
+      );
+      if (res.statusCode != 200) return null;
+      final map = jsonDecode(res.body) as Map<String, dynamic>;
+      final userJson = map['user'] as Map<String, dynamic>? ?? {};
+      return userProfileFromApiUser(userJson);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<UserProfile> updateProfile(UserProfile profile) async {
     final res = await _client.put(
       _uri('/auth/profile'),
@@ -278,11 +323,70 @@ class ApiService {
   }
 
   void close() => _client.close();
+
+  /// Removes the offline schemes JSON cache from SharedPreferences.
+  ///
+  /// Call this when the user changes their state so the next [fetchSchemes]
+  /// call always goes to the network with the updated user profile.
+  Future<void> clearOfflineSchemesCache() => _storage.clearOfflineSchemes();
+
+
+  // ── Admin User Management ───────────────────────────────────────────────
+  Future<List<UserProfile>> fetchAdminUsers() async {
+    final res = await _client.get(
+      _uri('/admin/users'),
+      headers: await _headers(auth: true),
+    );
+    _throwIfError(res);
+    final decoded = jsonDecode(res.body);
+    if (decoded is! List) throw ApiException('Invalid users payload');
+    return decoded
+        .whereType<Map<String, dynamic>>()
+        .map((u) => UserProfile.fromJson(u))
+        .toList(growable: false);
+  }
+
+  Future<UserProfile> suspendUser(String userId, {String reason = ''}) async {
+    final res = await _client.patch(
+      _uri('/admin/users/$userId/suspend'),
+      headers: await _headers(auth: true),
+      body: jsonEncode({'reason': reason}),
+    );
+    _throwIfError(res);
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<UserProfile> blockUser(String userId) async {
+    final res = await _client.patch(
+      _uri('/admin/users/$userId/block'),
+      headers: await _headers(auth: true),
+    );
+    _throwIfError(res);
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<UserProfile> activateUser(String userId) async {
+    final res = await _client.patch(
+      _uri('/admin/users/$userId/activate'),
+      headers: await _headers(auth: true),
+    );
+    _throwIfError(res);
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
+
+  Future<UserProfile> softDeleteUser(String userId) async {
+    final res = await _client.delete(
+      _uri('/admin/users/$userId'),
+      headers: await _headers(auth: true),
+    );
+    _throwIfError(res);
+    return UserProfile.fromJson(jsonDecode(res.body) as Map<String, dynamic>);
+  }
 }
 
 UserProfile userProfileFromApiUser(Map<String, dynamic> u) {
   return UserProfile(
-    id: (u['id'] ?? '').toString(),
+    id: (u['id'] ?? u['_id'] ?? '').toString(),
     mobile: (u['mobile'] ?? '').toString(),
     name: (u['name'] ?? '').toString(),
     state: (u['state'] ?? '').toString(),
@@ -293,6 +397,13 @@ UserProfile userProfileFromApiUser(Map<String, dynamic> u) {
     soilType: (u['soilType'] ?? '').toString(),
     landSize: int.tryParse((u['landSize'] ?? 0).toString()) ?? 0,
     role: (u['role'] ?? 'user').toString(),
+    status: (u['status'] ?? 'ACTIVE').toString(),
+    isOnline: u['isOnline'] == true,
+    lastSeen: u['lastSeen'] != null ? DateTime.tryParse(u['lastSeen'].toString()) : null,
+    suspensionReason: (u['suspensionReason'] ?? '').toString(),
+    deletedAt: u['deletedAt'] != null ? DateTime.tryParse(u['deletedAt'].toString()) : null,
+    deviceType: (u['deviceType'] ?? '').toString(),
+    createdAt: u['createdAt'] != null ? DateTime.tryParse(u['createdAt'].toString()) : null,
   );
 }
 

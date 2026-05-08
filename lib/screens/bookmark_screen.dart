@@ -121,7 +121,7 @@ class BookmarkScreen extends ConsumerWidget {
                           scheme: scheme,
                           isBookmarked: true,
                           isReminded: reminderIds.contains(scheme.id),
-                          onTap: () => context.go(
+                          onTap: () => context.push(
                             '/scheme/${Uri.encodeComponent(scheme.id)}',
                           ),
                           onApply: () async {

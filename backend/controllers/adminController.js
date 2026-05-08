@@ -36,4 +36,53 @@ async function sendBroadcast(req, res) {
   }
 }
 
-module.exports = { listUsers, approveScheme, sendBroadcast };
+async function suspendUser(req, res) {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const user = await User.findByIdAndUpdate(id, { status: 'SUSPENDED', suspensionReason: reason || 'Violation of terms' }, { new: true }).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json(user);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to suspend user' });
+  }
+}
+
+async function blockUser(req, res) {
+  try {
+    const { id } = req.params;
+    const user = await User.findByIdAndUpdate(id, { status: 'BLOCKED' }, { new: true }).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json(user);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to block user' });
+  }
+}
+
+async function activateUser(req, res) {
+  try {
+    const { id } = req.params;
+    const user = await User.findByIdAndUpdate(id, { status: 'ACTIVE', suspensionReason: '', deletedAt: null }, { new: true }).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json(user);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to activate user' });
+  }
+}
+
+async function deleteUser(req, res) {
+  try {
+    const { id } = req.params;
+    const user = await User.findByIdAndUpdate(id, { status: 'DELETED', deletedAt: new Date() }, { new: true }).select('-password').lean();
+    if (!user) return res.status(404).json({ message: 'User not found' });
+    return res.json(user);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ message: 'Failed to delete user' });
+  }
+}
+
+module.exports = { listUsers, approveScheme, sendBroadcast, suspendUser, blockUser, activateUser, deleteUser };
